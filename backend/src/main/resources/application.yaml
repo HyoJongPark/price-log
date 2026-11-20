@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: price-log
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:55436/pricelog
+    username: pricelog
+    password: pricelog_local

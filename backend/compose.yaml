@@ -1,0 +1,20 @@
+name: price-log-dev
+services:
+  db:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: pricelog
+      POSTGRES_USER: pricelog
+      POSTGRES_PASSWORD: pricelog_local
+    ports:
+      - "127.0.0.1:55436:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pricelog -d pricelog"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres-data:
