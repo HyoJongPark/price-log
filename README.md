@@ -28,5 +28,25 @@ npm run dev
 
 ## 검증
 
-- `backend/`에서 `./gradlew build`를 실행하면 통합 테스트와 JAR 빌드가 함께 수행된다. Docker 엔진만 실행 중이면 Testcontainers가 별도 PostgreSQL을 띄워 쓰기와 조회를 검증한다. 개발용 Compose DB는 꺼 두어도 된다.
-- `frontend/`에서 `npm ci` 후 `npm run build`를 실행하면 타입 검사와 배포용 빌드가 수행된다.
+Java 운영 코드와 테스트 코드는 [Google Java Style Guide](https://google.github.io/styleguide/javaguide.html)를 따른다. 블록 들여쓰기는 공백 2칸, 줄 길이는 원칙적으로 100자다. [Gradle 설정](backend/build.gradle)에서 Checkstyle에 포함된 `google_checks.xml`을 사용하며, 경고 한 건도 빌드 실패로 처리한다.
+
+프런트엔드는 [Biome 설정](frontend/biome.json)에 기본 권장 규칙과 [React 권장 규칙](https://biomejs.dev/linter/domains/#react)을 명시한다. 조건부 Hook 호출 같은 오류와 서식을 함께 검사하고 경고도 실패로 처리한다. 서식은 공백 2칸, JavaScript 작은따옴표, 필요한 경우에만 세미콜론을 사용한다.
+
+백엔드 명령은 `backend/`에서 실행한다. 테스트는 Docker 엔진을 사용하며, Testcontainers가 별도 PostgreSQL 17을 띄운다. 개발용 Compose DB는 꺼 두어도 된다.
+
+| 명령 | 확인하는 것 |
+| --- | --- |
+| `./gradlew checkstyleMain checkstyleTest` | 운영·테스트 Java 코드의 정적 규칙과 서식 |
+| `./gradlew test` | JUnit 테스트와 격리 DB 쓰기·조회 |
+| `./gradlew build` | 정적 검사·테스트를 포함한 전체 빌드와 JAR 생성 |
+
+프런트엔드 명령은 `frontend/`에서 `npm ci` 후 실행한다.
+
+| 명령 | 확인하는 것 |
+| --- | --- |
+| `npm run lint` | Biome 린트·서식 검사. 서식을 적용할 때는 `npm run format` |
+| `npm run typecheck` | TypeScript 타입 |
+| `npm run build` | 타입 검사와 배포용 번들 생성 |
+| `npm run dev` | 브라우저에서 변경한 화면을 열고 입력·표시 결과를 확인할 개발 서버 |
+
+변경에 적절한 검증 수준은 [테스트 판단 기준](docs/testing.md), 원본 화면과 기대 동작은 [제품 가이드](docs/product.md)에서 확인한다.
