@@ -1,4 +1,4 @@
-package kr.pricelog;
+package kr.co.pricelog;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

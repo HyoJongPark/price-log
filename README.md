@@ -1,6 +1,6 @@
 # Price Log · 프라이스로그
 
-한국 Steam 게임 가격 기록 서비스. `backend/`는 Java 21과 Spring Boot, `frontend/`는 React와 TypeScript로 구성한다.
+한국 Steam 게임 가격 기록 서비스. 서비스 도메인은 `price-log.co.kr`이다. `backend/`는 Java 21과 Spring Boot, `frontend/`는 React와 TypeScript로 구성한다.
 
 ## 로컬 실행
 
