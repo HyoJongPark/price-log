@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+    "https://checkstyle.org/dtds/configuration_1_3.dtd">
+<module name="Checker">
+  <module name="TreeWalker">
+    <module name="Indentation">
+      <property name="basicOffset" value="4"/>
+      <property name="caseIndent" value="4"/>
+      <property name="arrayInitIndent" value="4"/>
+    </module>
+    <module name="MatchXpath">
+      <property name="query" value="//TYPE/IDENT[@text='var']"/>
+      <message key="matchxpath.match" value="Declare the local variable type explicitly."/>
+    </module>
+    <module name="MatchXpath">
+      <property name="query" value="//*[self::CLASS_DEF or self::RECORD_DEF][MODIFIERS/ANNOTATION//IDENT[@text=('Entity','Embeddable','MappedSuperclass')]]/(OBJBLOCK/VARIABLE_DEF|RECORD_COMPONENTS/RECORD_COMPONENT_DEF)/TYPE//IDENT[@text=('LocalDateTime','ZonedDateTime','OffsetDateTime','Date','Timestamp','Calendar')]"/>
+      <message key="matchxpath.match" value="Use Instant for persisted points in time."/>
+    </module>
+    <module name="MatchXpath">
+      <property name="query" value="//*[MODIFIERS/ANNOTATION//IDENT[@text=('Controller','RestController')]]
+          /IDENT[not(ends-with(@text,'Controller'))]"/>
+      <message key="matchxpath.match" value="Controller type names must end in Controller."/>
+    </module>
+    <module name="MatchXpath">
+      <property name="query" value="//*[MODIFIERS/ANNOTATION//IDENT[@text='Service']]
+          /IDENT[not(ends-with(@text,'Service'))]"/>
+      <message key="matchxpath.match" value="Service type names must end in Service."/>
+    </module>
+    <module name="MatchXpath">
+      <property name="query" value="//*[MODIFIERS/ANNOTATION//IDENT[@text=('Repository','RepositoryDefinition')]
+          or (EXTENDS_CLAUSE|IMPLEMENTS_CLAUSE)/(IDENT|DOT/IDENT)[ends-with(@text,'Repository')]]
+          /IDENT[not(ends-with(@text,'Repository'))]"/>
+      <message key="matchxpath.match" value="Repository type names must end in Repository."/>
+    </module>
+    <module name="EmptyLineSeparator">
+      <property name="id" value="entityFields"/>
+      <property name="tokens" value="VARIABLE_DEF"/>
+    </module>
+    <module name="SuppressionXpathSingleFilter">
+      <property name="id" value="entityFields"/>
+      <property name="query" value="//*[not(ancestor-or-self::OBJBLOCK[parent::CLASS_DEF/MODIFIERS/ANNOTATION//IDENT[@text=('Entity','Embeddable','MappedSuperclass')]])]"/>
+    </module>
+  </module>
+</module>

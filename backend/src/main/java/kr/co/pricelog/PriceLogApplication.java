@@ -7,8 +7,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 @SpringBootApplication
 public class PriceLogApplication {
 
-  /** 명령줄 인자를 Spring Boot에 전달해 서버를 시작한다. */
-  public static void main(String[] args) {
-    SpringApplication.run(PriceLogApplication.class, args);
-  }
+    /** 명령줄 인자를 Spring Boot에 전달해 서버를 시작한다. */
+    public static void main(String[] args) {
+        SpringApplication.run(PriceLogApplication.class, args);
+    }
 }

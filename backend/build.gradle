@@ -19,6 +19,8 @@ checkstyle {
     def checkstyleJar = "checkstyle-${toolVersion}.jar"
     config = resources.text.fromArchiveEntry(
         configurations.checkstyle.filter { it.name == checkstyleJar }, 'google_checks.xml')
+    configProperties = ['org.checkstyle.google.suppressionfilter.config':
+        file('config/checkstyle/suppressions.xml').absolutePath]
     maxWarnings = 0
 }
 
@@ -41,4 +43,15 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+def conventions = tasks.register('checkstyleConventions', Checkstyle) {
+    description = 'Checks project Java conventions in production and test sources.'
+    source(sourceSets.main.allJava, sourceSets.test.allJava)
+    classpath = files()
+    config = resources.text.fromFile('config/checkstyle/conventions.xml')
+}
+
+tasks.named('check') {
+    dependsOn conventions
 }

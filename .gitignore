@@ -4,6 +4,7 @@
 /graft/
 /.agents/skills/harness/
 /.local/work/
+/research/
 /backend/.gradle/
 /backend/.env
 /backend/build/

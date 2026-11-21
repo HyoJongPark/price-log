@@ -28,7 +28,7 @@ npm run dev
 
 ## 검증
 
-Java 운영 코드와 테스트 코드는 [Google Java Style Guide](https://google.github.io/styleguide/javaguide.html)를 따른다. 블록 들여쓰기는 공백 2칸, 줄 길이는 원칙적으로 100자다. [Gradle 설정](backend/build.gradle)에서 Checkstyle에 포함된 `google_checks.xml`을 사용하며, 경고 한 건도 빌드 실패로 처리한다.
+Java 운영 코드와 테스트 코드는 [Google Java Style Guide](https://google.github.io/styleguide/javaguide.html)를 따른다. 프로젝트 규칙으로 블록마다 공백 4칸을 들여쓰고, 줄 길이는 원칙적으로 100자로 제한한다. [Gradle 설정](backend/build.gradle)에서 Checkstyle에 포함된 `google_checks.xml`을 사용하며, 경고 한 건도 빌드 실패로 처리한다. 프로젝트 Checkstyle 규칙은 명시적 지역 변수 타입, 엔티티 필드 간격, 영속 시각 타입, 컨트롤러·서비스·저장소 이름의 접미사를 검사한다. 책임 배치와 문단 구분은 [백엔드 개발과 리뷰](backend/AGENTS.md)를 따른다.
 
 프런트엔드는 [Biome 설정](frontend/biome.json)에 기본 권장 규칙과 [React 권장 규칙](https://biomejs.dev/linter/domains/#react)을 명시한다. 조건부 Hook 호출 같은 오류와 서식을 함께 검사하고 경고도 실패로 처리한다. 서식은 공백 2칸, JavaScript 작은따옴표, 필요한 경우에만 세미콜론을 사용한다.
 
@@ -36,7 +36,7 @@ Java 운영 코드와 테스트 코드는 [Google Java Style Guide](https://goog
 
 | 명령 | 확인하는 것 |
 | --- | --- |
-| `./gradlew checkstyleMain checkstyleTest` | 운영·테스트 Java 코드의 정적 규칙과 서식 |
+| `./gradlew checkstyleMain checkstyleTest checkstyleConventions` | 운영·테스트 Java 코드의 정적 규칙과 서식 |
 | `./gradlew test` | JUnit 테스트와 격리 DB 쓰기·조회 |
 | `./gradlew build` | 정적 검사·테스트를 포함한 전체 빌드와 JAR 생성 |
 
