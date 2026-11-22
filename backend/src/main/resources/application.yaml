@@ -3,6 +3,10 @@ spring:
     import: "optional:file:./.env[.properties]"
   application:
     name: price-log
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
   datasource:
     url: jdbc:postgresql://127.0.0.1:55436/pricelog
     username: pricelog

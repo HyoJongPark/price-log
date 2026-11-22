@@ -23,23 +23,24 @@ class PostgresConnectionIntegrationTest {
         new PostgreSQLContainer<>("postgres:17.6-alpine").withDatabaseName("pricelog_test");
 
     @Autowired
-    JdbcTemplate jdbc;
+    JdbcTemplate jdbcTemplate;
 
     @Test
     @Transactional
     @DisplayName("애플리케이션이 테스트용 PostgreSQL에 연결해 쓴 값을 다시 읽는다")
     void writesAndReadsUsingTheTestDatabase() {
         // given
-        jdbc.execute(
+        jdbcTemplate.execute(
             "create temporary table messages (id integer primary key, body text not null)");
 
         // when
-        jdbc.update("insert into messages (id, body) values (?, ?)", 1, "프라이스로그");
+        jdbcTemplate.update("insert into messages (id, body) values (?, ?)", 1, "프라이스로그");
 
         // then
-        assertThat(jdbc.queryForObject("select current_database()", String.class))
+        assertThat(jdbcTemplate.queryForObject("select current_database()", String.class))
             .isEqualTo(postgres.getDatabaseName());
-        assertThat(jdbc.queryForObject("select body from messages where id = ?", String.class, 1))
+        assertThat(jdbcTemplate.queryForObject(
+            "select body from messages where id = ?", String.class, 1))
             .isEqualTo("프라이스로그");
     }
 }

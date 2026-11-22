@@ -21,13 +21,13 @@ public class SteamAppListClient {
     private static final String PAGE_QUERY =
         "{\"include_games\":%b,\"include_dlc\":%b,\"last_appid\":%d,\"max_results\":%d}";
 
-    private final RestClient client;
+    private final RestClient restClient;
     private final String apiKey;
 
     /** 목록 API에서만 서버의 Web API 키로 인증한다. */
-    public SteamAppListClient(RestClient.Builder builder,
+    public SteamAppListClient(RestClient.Builder restClientBuilder,
                               @Value("${STEAM_WEB_API_KEY:}") String apiKey) {
-        this.client = builder.baseUrl("https://api.steampowered.com").build();
+        this.restClient = restClientBuilder.baseUrl("https://api.steampowered.com").build();
         this.apiKey = apiKey;
     }
 
@@ -44,7 +44,7 @@ public class SteamAppListClient {
 
         String query = String.format(Locale.ROOT, PAGE_QUERY,
             type == SteamAppType.GAME, type == SteamAppType.DLC, lastAppId, pageSize);
-        SteamAppListResponse result = client.get()
+        SteamAppListResponse result = restClient.get()
             .uri("/IStoreService/GetAppList/v1/?input_json={query}", query)
             .header("x-webapi-key", apiKey)
             .retrieve()

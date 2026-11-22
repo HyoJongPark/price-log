@@ -29,9 +29,11 @@ import org.springframework.web.client.RestClientException;
 
 class SteamAppListClientTest {
 
-    private final RestClient.Builder builder = RestClient.builder();
-    private final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-    private final SteamAppListClient steam = new SteamAppListClient(builder, "test-key");
+    private final RestClient.Builder restClientBuilder = RestClient.builder();
+    private final MockRestServiceServer mockRestServiceServer =
+        MockRestServiceServer.bindTo(restClientBuilder).build();
+    private final SteamAppListClient steamAppListClient =
+        new SteamAppListClient(restClientBuilder, "test-key");
 
     @Nested
     @DisplayName("종류별 목록과 페이지 경계")
@@ -52,15 +54,16 @@ class SteamAppListClientTest {
                 """);
 
             // when
-            SteamAppPage first = steam.getPage(type, 0, 2);
-            SteamAppPage last = steam.getPage(type, first.nextCursor().orElseThrow(), 2);
+            SteamAppPage first = steamAppListClient.getPage(type, 0, 2);
+            SteamAppPage last = steamAppListClient.getPage(type,
+                first.nextCursor().orElseThrow(), 2);
 
             // then
             assertThat(first.apps()).containsExactly(new SteamApp(10, "First"),
                 new SteamApp(70, "Second"));
             assertThat(last.apps()).containsExactly(new SteamApp(200, "Last"));
             assertThat(last.nextCursor()).isEmpty();
-            server.verify();
+            mockRestServiceServer.verify();
         }
 
         @Test
@@ -74,14 +77,14 @@ class SteamAppListClientTest {
             expectPage(true, false, 4_294_967_295L, 50_000, "{\"response\":{}}");
 
             // when
-            SteamAppPage first = steam.getPage(SteamAppType.GAME, 4_294_967_294L, 1);
-            SteamAppPage last = steam.getPage(SteamAppType.GAME,
+            SteamAppPage first = steamAppListClient.getPage(SteamAppType.GAME, 4_294_967_294L, 1);
+            SteamAppPage last = steamAppListClient.getPage(SteamAppType.GAME,
                 first.nextCursor().orElseThrow(), 50_000);
 
             // then
             assertThat(first.apps()).containsExactly(new SteamApp(4_294_967_295L, "Last app"));
             assertThat(last.nextCursor()).isEmpty();
-            server.verify();
+            mockRestServiceServer.verify();
         }
 
         @ParameterizedTest
@@ -89,10 +92,11 @@ class SteamAppListClientTest {
         @DisplayName("남은 앱이 없으면 빈 페이지로 종료한다")
         void endsOnEmptyPage(String body) {
             // given
-            server.expect(anything()).andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+            mockRestServiceServer.expect(anything())
+                .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
 
             // when
-            SteamAppPage page = steam.getPage(SteamAppType.GAME, 70, 2);
+            SteamAppPage page = steamAppListClient.getPage(SteamAppType.GAME, 70, 2);
 
             // then
             assertThat(page.apps()).isEmpty();
@@ -112,7 +116,8 @@ class SteamAppListClientTest {
             SteamAppType type = SteamAppType.GAME;
 
             // when
-            Throwable failure = catchThrowable(() -> steam.getPage(type, cursor, pageSize));
+            Throwable failure = catchThrowable(
+                () -> steamAppListClient.getPage(type, cursor, pageSize));
 
             // then
             assertThat(failure).isInstanceOf(IllegalArgumentException.class)
@@ -123,10 +128,11 @@ class SteamAppListClientTest {
         @DisplayName("서버 키가 비어 있으면 인증 요청을 보내기 전에 설정 오류를 알린다")
         void rejectsMissingApiKey() {
             // given
-            SteamAppListClient unconfigured = new SteamAppListClient(builder, "");
+            SteamAppListClient clientWithoutApiKey = new SteamAppListClient(restClientBuilder, "");
 
             // when
-            Throwable failure = catchThrowable(() -> unconfigured.getPage(SteamAppType.DLC, 0, 1));
+            Throwable failure = catchThrowable(
+                () -> clientWithoutApiKey.getPage(SteamAppType.DLC, 0, 1));
 
             // then
             assertThat(failure).isInstanceOf(IllegalStateException.class)
@@ -138,10 +144,12 @@ class SteamAppListClientTest {
         @DisplayName("성공 응답 본체가 없으면 수집 실패다")
         void rejectsMissingResponse(String body) {
             // given
-            server.expect(anything()).andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+            mockRestServiceServer.expect(anything())
+                .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
 
             // when
-            Throwable failure = catchThrowable(() -> steam.getPage(SteamAppType.DLC, 0, 2));
+            Throwable failure = catchThrowable(
+                () -> steamAppListClient.getPage(SteamAppType.DLC, 0, 2));
 
             // then
             assertThat(failure).isInstanceOf(RestClientException.class).hasMessageContaining("누락");
@@ -166,10 +174,12 @@ class SteamAppListClientTest {
         void rejectsBrokenContinuation(String response) {
             // given
             String body = "{\"response\":" + response + "}";
-            server.expect(anything()).andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+            mockRestServiceServer.expect(anything())
+                .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
 
             // when
-            Throwable failure = catchThrowable(() -> steam.getPage(SteamAppType.GAME, 70, 2));
+            Throwable failure = catchThrowable(
+                () -> steamAppListClient.getPage(SteamAppType.GAME, 70, 2));
 
             // then
             assertThat(failure).isInstanceOf(RestClientException.class).hasMessageContaining("커서");
@@ -182,10 +192,12 @@ class SteamAppListClientTest {
         void rejectsIncompleteApp(String app) {
             // given
             String body = "{\"response\":{\"apps\":[" + app + "]}}";
-            server.expect(anything()).andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+            mockRestServiceServer.expect(anything())
+                .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
 
             // when
-            Throwable failure = catchThrowable(() -> steam.getPage(SteamAppType.GAME, 0, 2));
+            Throwable failure = catchThrowable(
+                () -> steamAppListClient.getPage(SteamAppType.GAME, 0, 2));
 
             // then
             assertThat(failure).isInstanceOf(RestClientException.class);
@@ -195,10 +207,11 @@ class SteamAppListClientTest {
         @DisplayName("Steam의 접근 거부를 빈 목록으로 처리하지 않는다")
         void propagatesAccessDenied() {
             // given
-            server.expect(anything()).andRespond(withStatus(HttpStatus.FORBIDDEN));
+            mockRestServiceServer.expect(anything()).andRespond(withStatus(HttpStatus.FORBIDDEN));
 
             // when
-            Throwable failure = catchThrowable(() -> steam.getPage(SteamAppType.GAME, 0, 2));
+            Throwable failure = catchThrowable(
+                () -> steamAppListClient.getPage(SteamAppType.GAME, 0, 2));
 
             // then
             assertThat(failure).isInstanceOf(HttpClientErrorException.Forbidden.class);
@@ -206,7 +219,7 @@ class SteamAppListClientTest {
     }
 
     private void expectPage(boolean games, boolean dlc, long cursor, int pageSize, String body) {
-        server.expect(request -> {
+        mockRestServiceServer.expect(request -> {
             assertThat(request.getURI().getScheme()).isEqualTo("https");
             assertThat(request.getURI().getHost()).isEqualTo("api.steampowered.com");
             assertThat(request.getURI().getPath()).isEqualTo("/IStoreService/GetAppList/v1/");
