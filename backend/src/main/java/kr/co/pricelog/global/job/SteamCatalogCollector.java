@@ -1,34 +1,50 @@
 package kr.co.pricelog.global.job;
 
 import java.time.Instant;
-import kr.co.pricelog.domain.game.service.GameCatalogService;
+import java.util.List;
+import java.util.OptionalLong;
+import kr.co.pricelog.domain.collection.service.SteamCatalogCollectionService;
+import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.global.client.steam.SteamAppListClient;
 import kr.co.pricelog.global.client.steam.dto.SteamAppPage;
-import kr.co.pricelog.global.client.steam.enums.SteamAppType;
 import org.springframework.stereotype.Component;
 
-/** Steam에서 한 페이지를 읽고 카탈로그 갱신을 요청한다. */
+/** Steam 본편과 DLC를 페이지 단위로 수집한다. */
 @Component
 public class SteamCatalogCollector {
 
+    private static final int PAGE_SIZE = 10_000;
+
     private final SteamAppListClient steamAppListClient;
-    private final GameCatalogService gameCatalogService;
+    private final SteamCatalogCollectionService steamCatalogCollectionService;
 
     /** 페이지 조회와 저장에 필요한 의존성을 받는다. */
     public SteamCatalogCollector(SteamAppListClient steamAppListClient,
-                                GameCatalogService gameCatalogService) {
+                                SteamCatalogCollectionService steamCatalogCollectionService) {
         this.steamAppListClient = steamAppListClient;
-        this.gameCatalogService = gameCatalogService;
+        this.steamCatalogCollectionService = steamCatalogCollectionService;
     }
 
-    /** 페이지 반영이 끝나면 다음 요청에 사용할 커서를 포함해 반환한다. */
-    public SteamAppPage collectPage(SteamAppType type, long cursor, int pageSize) {
-        SteamAppPage page = steamAppListClient.getPage(type, cursor, pageSize);
-        if (page.apps().isEmpty()) {
-            return page;
+    /** 같은 예정 시각으로 재호출하면 각 목록의 마지막 커밋 다음부터 수집한다. */
+    public void collectAll(Instant scheduledAt) {
+        for (SteamAppType type : List.of(SteamAppType.GAME, SteamAppType.DLC)) {
+            collectList(type, scheduledAt);
         }
+    }
 
-        gameCatalogService.applyPage(type, page.apps(), Instant.now());
-        return page;
+    private void collectList(SteamAppType type, Instant scheduledAt) {
+        OptionalLong nextCursor = steamCatalogCollectionService.resumeCursor(type, scheduledAt);
+
+        try {
+            while (nextCursor.isPresent()) {
+                SteamAppPage page = steamAppListClient.getPage(type, nextCursor.getAsLong(),
+                    PAGE_SIZE);
+                nextCursor = steamCatalogCollectionService.savePageAndAdvanceCursor(
+                    type, scheduledAt, page, Instant.now());
+            }
+        } catch (RuntimeException collectionFailure) {
+            steamCatalogCollectionService.markFailed(type, scheduledAt);
+            throw collectionFailure;
+        }
     }
 }

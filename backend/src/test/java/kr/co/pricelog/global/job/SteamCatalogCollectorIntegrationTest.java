@@ -1,21 +1,25 @@
 package kr.co.pricelog.global.job;
 
-import static kr.co.pricelog.global.client.steam.enums.SteamAppType.DLC;
-import static kr.co.pricelog.global.client.steam.enums.SteamAppType.GAME;
+import static kr.co.pricelog.domain.game.enums.SteamAppType.DLC;
+import static kr.co.pricelog.domain.game.enums.SteamAppType.GAME;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import jakarta.persistence.EntityManager;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.OptionalLong;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.domain.game.service.GameCatalogService;
 import kr.co.pricelog.global.client.steam.SteamAppListClient;
 import kr.co.pricelog.global.client.steam.dto.SteamApp;
@@ -27,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -56,11 +61,15 @@ class SteamCatalogCollectorIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private EntityManager entityManager;
+
     @MockitoBean
     private SteamAppListClient steamAppListClient;
 
     @AfterEach
     void clearCatalog() {
+        jdbcTemplate.update("DELETE FROM pipeline_execution");
         jdbcTemplate.update("DELETE FROM game");
     }
 
@@ -72,31 +81,45 @@ class SteamCatalogCollectorIntegrationTest {
         @DisplayName("앱 번호와 이름을 종류에 맞게 저장하고 같은 페이지 재생은 갱신하지 않는다")
         void storesGamesAndDlcOnce() {
             // given
-            SteamAppPage games = new SteamAppPage(List.of(new SteamApp(10, "Counter-Strike"),
-                new SteamApp(20, "Team Fortress Classic")), OptionalLong.of(20));
-            when(steamAppListClient.getPage(GAME, 0, 2)).thenAnswer(call -> {
-                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-                return games;
-            });
-            when(steamAppListClient.getPage(DLC, 0, 2))
-                .thenReturn(lastPage(660, "Portal 2 MotionPack"));
+            List<SteamApp> games = List.of(new SteamApp(10, "Counter-Strike"),
+                new SteamApp(20, "Team Fortress Classic"));
 
             // when
-            final SteamAppPage first = steamCatalogCollector.collectPage(GAME, 0, 2);
-            steamCatalogCollector.collectPage(DLC, 0, 2);
-            steamCatalogCollector.collectPage(GAME, 0, 2);
+            gameCatalogService.applyPage(GAME, games, FIRST);
+            gameCatalogService.applyPage(DLC, List.of(new SteamApp(660, "Portal 2 MotionPack")),
+                FIRST);
+            gameCatalogService.applyPage(GAME, games, NEXT);
 
             // then
-            assertThat(first.nextCursor()).hasValue(20);
             assertThat(jdbcTemplate.queryForList("""
                 SELECT steam_app_id || '/' || app_type || '/' || name
                 FROM game ORDER BY steam_app_id
-                """, String.class)).containsExactly("10/game/Counter-Strike",
-                    "20/game/Team Fortress Classic", "660/dlc/Portal 2 MotionPack");
+                """, String.class)).containsExactly("10/GAME/Counter-Strike",
+                    "20/GAME/Team Fortress Classic", "660/DLC/Portal 2 MotionPack");
             assertThat(jdbcTemplate.queryForObject("""
                 SELECT count(*) FROM game WHERE sale_status = 'unknown' AND parent_game_id IS NULL
                   AND detail_checked_at IS NULL AND updated_at = created_at
                 """, Integer.class)).isEqualTo(3);
+        }
+
+        @Test
+        @DisplayName("게임과 DLC 및 종류 미확인 행을 같은 앱 종류 enum으로 조회한다")
+        void readsStoredAppTypes() {
+            // given
+            gameCatalogService.applyPage(GAME, List.of(new SteamApp(10, "본편")), FIRST);
+            gameCatalogService.applyPage(DLC, List.of(new SteamApp(20, "DLC")), FIRST);
+            jdbcTemplate.update("""
+                INSERT INTO game (steam_app_id, name, app_type, created_at, updated_at)
+                VALUES (30, '미확인', 'UNKNOWN', now(), now())
+                """);
+
+            // when
+            List<SteamAppType> types = entityManager.createQuery(
+                "select g.appType from Game g order by g.steamAppId", SteamAppType.class)
+                .getResultList();
+
+            // then
+            assertThat(types).containsExactly(GAME, DLC, SteamAppType.UNKNOWN);
         }
 
         @Test
@@ -127,19 +150,16 @@ class SteamCatalogCollectorIntegrationTest {
         @DisplayName("빈 페이지와 원천 실패는 기존 앱을 삭제하거나 새 행을 만들지 않는다")
         void preservesCatalogOnEmptyOrFailedPage() {
             // given
-            when(steamAppListClient.getPage(GAME, 0, 1)).thenReturn(lastPage(10, "First"));
-            steamCatalogCollector.collectPage(GAME, 0, 1);
-            when(steamAppListClient.getPage(GAME, 10, 1))
-                .thenReturn(new SteamAppPage(List.of(), OptionalLong.empty()))
+            gameCatalogService.applyPage(GAME, List.of(new SteamApp(10, "First")), FIRST);
+            when(steamAppListClient.getPage(GAME, 0, 10_000))
+                .thenReturn(new SteamAppPage(List.of(), OptionalLong.empty()));
+            when(steamAppListClient.getPage(DLC, 0, 10_000))
                 .thenThrow(new RestClientException("원천 실패"));
 
             // when
-            SteamAppPage empty = steamCatalogCollector.collectPage(GAME, 10, 1);
-            Throwable failure = catchThrowable(
-                () -> steamCatalogCollector.collectPage(GAME, 10, 1));
+            Throwable failure = catchThrowable(() -> steamCatalogCollector.collectAll(FIRST));
 
             // then
-            assertThat(empty.nextCursor()).isEmpty();
             assertThat(failure).isInstanceOf(RestClientException.class).hasMessage("원천 실패");
             assertThat(jdbcTemplate.queryForList("SELECT steam_app_id FROM game", Long.class))
                 .containsExactly(10L);
@@ -161,7 +181,7 @@ class SteamCatalogCollectorIntegrationTest {
 
             // then
             assertThat(jdbcTemplate.queryForList("""
-                SELECT name FROM game WHERE steam_app_id = 660 AND app_type = 'dlc'
+                SELECT name FROM game WHERE steam_app_id = 660 AND app_type = 'DLC'
                   AND updated_at = ? AND cardinality(search_aliases) = 0
                 """, String.class, Timestamp.from(NEXT))).containsExactly("New");
         }
@@ -171,25 +191,167 @@ class SteamCatalogCollectorIntegrationTest {
         void upsertsOverlappingPages() throws Exception {
             // given
             CyclicBarrier bothPagesRead = new CyclicBarrier(2);
-            SteamAppPage repeated = new SteamAppPage(List.of(new SteamApp(10, "First"),
-                new SteamApp(10, "Last")), OptionalLong.empty());
-            when(steamAppListClient.getPage(GAME, 0, 2)).thenAnswer(call -> {
-                bothPagesRead.await(10, TimeUnit.SECONDS);
-                return repeated;
-            });
-            Callable<SteamAppPage> collect = () -> steamCatalogCollector.collectPage(GAME, 0, 2);
+            List<SteamApp> repeated = List.of(new SteamApp(10, "First"), new SteamApp(10, "Last"));
 
             // when
-            try (ExecutorService workers = Executors.newFixedThreadPool(2)) {
-                Future<SteamAppPage> first = workers.submit(collect);
-                Future<SteamAppPage> second = workers.submit(collect);
+            try (ExecutorService workers = Executors.newSingleThreadExecutor()) {
+                Future<?> first = workers.submit(() -> {
+                    bothPagesRead.await(10, TimeUnit.SECONDS);
+                    gameCatalogService.applyPage(GAME, repeated, FIRST);
+                    return null;
+                });
+                bothPagesRead.await(10, TimeUnit.SECONDS);
+                gameCatalogService.applyPage(GAME, repeated, NEXT);
                 first.get(15, TimeUnit.SECONDS);
-                second.get(15, TimeUnit.SECONDS);
             }
 
             // then
             assertThat(jdbcTemplate.queryForList("SELECT name FROM game WHERE steam_app_id = 10",
                 String.class)).containsExactly("Last");
+        }
+    }
+
+    @Nested
+    @DisplayName("전체 목록 회차")
+    class FullCatalog {
+
+        private static final int PAGE_SIZE = 10_000;
+
+        @Test
+        @DisplayName("본편 완료 후 DLC 조회가 끊기면 커밋된 DLC 커서부터 다시 읽는다")
+        void resumesDlcAfterCommittedPage() {
+            // given
+            when(steamAppListClient.getPage(GAME, 0, PAGE_SIZE)).thenAnswer(call -> {
+                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                return morePages(10);
+            });
+            when(steamAppListClient.getPage(GAME, 10, PAGE_SIZE)).thenReturn(lastPage(20, "B"));
+            when(steamAppListClient.getPage(DLC, 0, PAGE_SIZE)).thenReturn(morePages(660));
+            when(steamAppListClient.getPage(DLC, 660, PAGE_SIZE))
+                .thenThrow(new RestClientException("DLC 조회 중단")).thenAnswer(call -> {
+                    assertThat(runStates()).contains("STEAM_DLC_LIST/RUNNING/660");
+                    return lastPage(670, "D");
+                });
+
+            // when
+            Throwable failure = catchThrowable(() -> steamCatalogCollector.collectAll(FIRST));
+
+            // then
+            assertThat(failure).isInstanceOf(RestClientException.class);
+            assertThat(runStates()).containsExactly("STEAM_DLC_LIST/FAILED/660",
+                "STEAM_GAME_LIST/COMPLETED/20");
+            assertThat(appIds()).containsExactly(10L, 20L, 660L);
+
+            steamCatalogCollector.collectAll(FIRST);
+            steamCatalogCollector.collectAll(FIRST);
+
+            assertThat(runStates()).containsExactly("STEAM_DLC_LIST/COMPLETED/670",
+                "STEAM_GAME_LIST/COMPLETED/20");
+            assertThat(appIds()).containsExactly(10L, 20L, 660L, 670L);
+            verify(steamAppListClient).getPage(GAME, 0, PAGE_SIZE);
+            verify(steamAppListClient).getPage(GAME, 10, PAGE_SIZE);
+            verify(steamAppListClient).getPage(DLC, 0, PAGE_SIZE);
+            verify(steamAppListClient, times(2)).getPage(DLC, 660, PAGE_SIZE);
+            verifyNoMoreInteractions(steamAppListClient);
+        }
+
+        @Test
+        @DisplayName("본편 첫 요청 실패 시 DLC를 시작하지 않고 같은 회차의 0번 커서로 재개한다")
+        void resumesGameFromFirstPage() {
+            // given
+            when(steamAppListClient.getPage(GAME, 0, PAGE_SIZE))
+                .thenThrow(new RestClientException("본편 조회 중단")).thenAnswer(call -> {
+                    assertThat(runStates()).containsExactly("STEAM_GAME_LIST/RUNNING/-");
+                    return lastPage(10, "본편");
+                });
+            when(steamAppListClient.getPage(DLC, 0, PAGE_SIZE))
+                .thenReturn(new SteamAppPage(List.of(), OptionalLong.empty()));
+
+            // when
+            Throwable failure = catchThrowable(() -> steamCatalogCollector.collectAll(FIRST));
+
+            // then
+            assertThat(failure).isInstanceOf(RestClientException.class).hasMessage("본편 조회 중단");
+            assertThat(runStates()).containsExactly("STEAM_GAME_LIST/FAILED/-");
+            assertThat(appIds()).isEmpty();
+
+            steamCatalogCollector.collectAll(FIRST);
+            assertThat(runStates()).containsExactly("STEAM_DLC_LIST/COMPLETED/-",
+                "STEAM_GAME_LIST/COMPLETED/10");
+            verify(steamAppListClient, times(2)).getPage(GAME, 0, PAGE_SIZE);
+            verify(steamAppListClient).getPage(DLC, 0, PAGE_SIZE);
+        }
+
+        @Test
+        @DisplayName("커서 갱신이 실패하면 게임도 롤백하고 재실행에서 그 페이지를 다시 저장한다")
+        void rollsBackGamesWithCursor() {
+            // given
+            when(steamAppListClient.getPage(GAME, 0, PAGE_SIZE)).thenReturn(morePages(10));
+            when(steamAppListClient.getPage(GAME, 10, PAGE_SIZE)).thenReturn(lastPage(20, "B"));
+            when(steamAppListClient.getPage(DLC, 0, PAGE_SIZE))
+                .thenReturn(new SteamAppPage(List.of(), OptionalLong.empty()));
+            jdbcTemplate.execute("""
+                ALTER TABLE pipeline_execution ADD CONSTRAINT test_fail_page
+                CHECK (list_cursor IS DISTINCT FROM 20)
+                """);
+
+            // when
+            Throwable failure;
+            try {
+                failure = catchThrowable(() -> steamCatalogCollector.collectAll(FIRST));
+            } finally {
+                jdbcTemplate.execute(
+                    "ALTER TABLE pipeline_execution DROP CONSTRAINT test_fail_page");
+            }
+
+            // then
+            assertThat(failure).isInstanceOf(DataIntegrityViolationException.class);
+            assertThat(runStates()).containsExactly("STEAM_GAME_LIST/FAILED/10");
+            assertThat(appIds()).containsExactly(10L);
+
+            steamCatalogCollector.collectAll(FIRST);
+            assertThat(runStates()).containsExactly("STEAM_DLC_LIST/COMPLETED/-",
+                "STEAM_GAME_LIST/COMPLETED/20");
+            assertThat(appIds()).containsExactly(10L, 20L);
+            verify(steamAppListClient).getPage(GAME, 0, PAGE_SIZE);
+            verify(steamAppListClient, times(2)).getPage(GAME, 10, PAGE_SIZE);
+        }
+
+        @Test
+        @DisplayName("다음 예정 시각에는 본편과 DLC를 각각 첫 페이지부터 새로 수집한다")
+        void startsBothListsFromZeroInNewSlot() {
+            // given
+            when(steamAppListClient.getPage(GAME, 0, PAGE_SIZE))
+                .thenReturn(lastPage(10, "첫 본편"), lastPage(20, "새 본편"));
+            when(steamAppListClient.getPage(DLC, 0, PAGE_SIZE))
+                .thenReturn(lastPage(30, "첫 DLC"), lastPage(40, "새 DLC"));
+            steamCatalogCollector.collectAll(FIRST);
+
+            // when
+            steamCatalogCollector.collectAll(NEXT);
+
+            // then
+            assertThat(runStates()).containsExactly("STEAM_DLC_LIST/COMPLETED/30",
+                "STEAM_DLC_LIST/COMPLETED/40", "STEAM_GAME_LIST/COMPLETED/10",
+                "STEAM_GAME_LIST/COMPLETED/20");
+            assertThat(appIds()).containsExactly(10L, 20L, 30L, 40L);
+        }
+
+        private SteamAppPage morePages(long appId) {
+            return new SteamAppPage(List.of(new SteamApp(appId, "App " + appId)),
+                OptionalLong.of(appId));
+        }
+
+        private List<Long> appIds() {
+            return jdbcTemplate.queryForList("SELECT steam_app_id FROM game ORDER BY steam_app_id",
+                Long.class);
+        }
+
+        private List<String> runStates() {
+            return jdbcTemplate.queryForList("""
+                SELECT pipeline || '/' || status || '/' || coalesce(list_cursor::text, '-')
+                FROM pipeline_execution ORDER BY pipeline, scheduled_at
+                """, String.class);
         }
     }
 

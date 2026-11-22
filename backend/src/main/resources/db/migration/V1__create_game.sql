@@ -3,7 +3,7 @@ CREATE TABLE game (
     steam_app_id bigint NOT NULL UNIQUE CHECK (steam_app_id BETWEEN 1 AND 4294967295),
     name text NOT NULL,
     search_aliases text[] NOT NULL DEFAULT '{}',
-    app_type text NOT NULL CHECK (app_type IN ('game', 'dlc', 'unknown')),
+    app_type text NOT NULL CHECK (app_type IN ('GAME', 'DLC', 'UNKNOWN')),
     parent_game_id bigint REFERENCES game (id),
     description text,
     image_url text,
@@ -19,5 +19,5 @@ CREATE TABLE game (
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     deleted_at timestamptz,
-    CHECK (parent_game_id IS NULL OR (parent_game_id <> id AND app_type <> 'game'))
+    CHECK (parent_game_id IS NULL OR (parent_game_id <> id AND app_type <> 'GAME'))
 );

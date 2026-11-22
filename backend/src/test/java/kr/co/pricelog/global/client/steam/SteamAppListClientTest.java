@@ -10,9 +10,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.global.client.steam.dto.SteamApp;
 import kr.co.pricelog.global.client.steam.dto.SteamAppPage;
-import kr.co.pricelog.global.client.steam.enums.SteamAppType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -124,6 +124,20 @@ class SteamAppListClientTest {
                 .hasMessageContaining("범위");
         }
 
+        @Test
+        @DisplayName("종류 미확인 상태로는 Steam 목록을 요청할 수 없다")
+        void rejectsUnknownType() {
+            // given
+            SteamAppType type = SteamAppType.UNKNOWN;
+
+            // when
+            Throwable failure = catchThrowable(() -> steamAppListClient.getPage(type, 0, 2));
+
+            // then
+            assertThat(failure).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("미확인");
+        }
+
         @ParameterizedTest
         @ValueSource(strings = {"", "   "})
         @DisplayName("Steam 키가 비어 있으면 클라이언트 생성 시 설정 오류를 알린다")
@@ -168,10 +182,16 @@ class SteamAppListClientTest {
                 {"have_more_results":true,"apps":[{"appid":70,"name":"Old"}],"last_appid":70}
                 """,
             """
+                {"apps":[{"appid":69,"name":"Old"}]}
+                """,
+            """
+                {"have_more_results":false,"apps":[{"appid":70,"name":"Repeated"}]}
+                """,
+            """
                 {"have_more_results":true,"apps":[{"appid":71,"name":"Next"}],"last_appid":90}
                 """
         })
-        @DisplayName("이어지는 페이지에 전진할 커서가 없거나 마지막 앱과 다르면 실패한다")
+        @DisplayName("응답의 앱이나 다음 커서가 요청 커서보다 앞서지 않으면 실패한다")
         void rejectsBrokenContinuation(String response) {
             // given
             String body = "{\"response\":" + response + "}";

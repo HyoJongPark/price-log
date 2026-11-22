@@ -3,11 +3,11 @@ package kr.co.pricelog.global.client.steam;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.OptionalLong;
+import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.global.client.steam.dto.SteamApp;
 import kr.co.pricelog.global.client.steam.dto.SteamAppList;
 import kr.co.pricelog.global.client.steam.dto.SteamAppListResponse;
 import kr.co.pricelog.global.client.steam.dto.SteamAppPage;
-import kr.co.pricelog.global.client.steam.enums.SteamAppType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
@@ -36,6 +36,9 @@ public class SteamAppListClient {
     /** 첫 페이지는 0, 다음 페이지는 직전 응답의 nextCursor로 요청한다. */
     public SteamAppPage getPage(SteamAppType type, long lastAppId, int pageSize) {
         Objects.requireNonNull(type);
+        if (type == SteamAppType.UNKNOWN) {
+            throw new IllegalArgumentException("미확인 앱은 목록 수집 대상이 아닙니다");
+        }
         if (lastAppId < 0 || lastAppId > SteamApp.MAX_APP_ID
             || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
             throw new IllegalArgumentException("Steam 목록 커서 또는 페이지 크기가 범위를 벗어났습니다");
@@ -57,13 +60,16 @@ public class SteamAppListClient {
     }
 
     private OptionalLong nextCursor(SteamAppList list, long previousCursor) {
+        if (list.apps().stream().anyMatch(app -> app.appId() <= previousCursor)) {
+            throw new RestClientException("Steam 목록에 요청 커서 이후의 앱이 아닌 항목이 있습니다");
+        }
         if (!list.hasMore()) {
             return OptionalLong.empty();
         }
 
         Long cursor = list.lastAppId();
-        if (cursor == null || cursor <= previousCursor) {
-            throw new RestClientException("Steam 목록의 다음 페이지 커서가 전진하지 않습니다");
+        if (cursor == null) {
+            throw new RestClientException("Steam 목록의 다음 페이지 커서가 누락되었습니다");
         }
         if (list.apps().isEmpty() || cursor != list.apps().getLast().appId()) {
             throw new RestClientException("Steam 목록의 커서와 마지막 앱 ID가 일치하지 않습니다");

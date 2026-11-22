@@ -1,9 +1,10 @@
-package kr.co.pricelog.global.client.steam.enums;
+package kr.co.pricelog.domain.game.enums;
 
-/** GetAppList에서 따로 순회하는 앱 종류. */
+/** 카탈로그에서 식별하는 Steam 앱 종류. */
 public enum SteamAppType {
     GAME("game"),
-    DLC("dlc");
+    DLC("dlc"),
+    UNKNOWN("unknown");
 
     private final String value;
 
@@ -11,7 +12,7 @@ public enum SteamAppType {
         this.value = value;
     }
 
-    /** 카탈로그에 저장하는 앱 종류의 문자열 표현을 반환한다. */
+    /** 앱 종류의 소문자 표기를 반환한다. */
     @Override
     public String toString() {
         return value;

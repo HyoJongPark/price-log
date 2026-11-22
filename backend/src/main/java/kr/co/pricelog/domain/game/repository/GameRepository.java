@@ -2,6 +2,7 @@ package kr.co.pricelog.domain.game.repository;
 
 import java.time.Instant;
 import kr.co.pricelog.domain.game.entity.Game;
+import kr.co.pricelog.domain.game.enums.SteamAppType;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
@@ -14,7 +15,7 @@ public interface GameRepository extends Repository<Game, Long> {
     @Modifying
     @Query(value = """
         INSERT INTO game AS g (steam_app_id, name, app_type, created_at, updated_at)
-        SELECT DISTINCT ON (app_id) app_id, app_name, :appType, :now, :now
+        SELECT DISTINCT ON (app_id) app_id, app_name, :#{#appType.name()}, :now, :now
         FROM unnest(CAST(:ids AS bigint[]), CAST(:names AS text[]))
              WITH ORDINALITY AS page(app_id, app_name, position)
         ORDER BY app_id, position DESC
@@ -25,12 +26,12 @@ public interface GameRepository extends Repository<Game, Long> {
                 WHEN g.name <> EXCLUDED.name AND NOT (g.name = ANY(g.search_aliases))
                 THEN array_append(g.search_aliases, g.name)
                 ELSE g.search_aliases END,
-            parent_game_id = CASE WHEN EXCLUDED.app_type = 'game' THEN NULL
+            parent_game_id = CASE WHEN EXCLUDED.app_type = 'GAME' THEN NULL
                                   ELSE g.parent_game_id END,
             updated_at = EXCLUDED.updated_at
         WHERE g.updated_at <= EXCLUDED.updated_at
           AND (g.name, g.app_type) IS DISTINCT FROM (EXCLUDED.name, EXCLUDED.app_type)
         """, nativeQuery = true)
     void upsertPage(@Param("ids") Long[] ids, @Param("names") String[] names,
-                    @Param("appType") String appType, @Param("now") Instant now);
+                    @Param("appType") SteamAppType appType, @Param("now") Instant now);
 }
