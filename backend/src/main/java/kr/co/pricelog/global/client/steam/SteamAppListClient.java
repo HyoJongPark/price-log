@@ -4,7 +4,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.OptionalLong;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
-import kr.co.pricelog.global.client.steam.dto.SteamApp;
+import kr.co.pricelog.global.client.steam.constants.SteamApiConstants;
 import kr.co.pricelog.global.client.steam.dto.SteamAppList;
 import kr.co.pricelog.global.client.steam.dto.SteamAppListResponse;
 import kr.co.pricelog.global.client.steam.dto.SteamAppPage;
@@ -29,7 +29,7 @@ public class SteamAppListClient {
     public SteamAppListClient(RestClient.Builder restClientBuilder,
                               @Value("${STEAM_WEB_API_KEY}") String apiKey) {
         Assert.hasText(apiKey, "STEAM_WEB_API_KEY에 빈 값을 사용할 수 없습니다");
-        this.restClient = restClientBuilder.baseUrl("https://api.steampowered.com").build();
+        this.restClient = restClientBuilder.baseUrl(SteamApiConstants.BASE_URL).build();
         this.apiKey = apiKey;
     }
 
@@ -39,7 +39,7 @@ public class SteamAppListClient {
         if (type == SteamAppType.UNKNOWN) {
             throw new IllegalArgumentException("미확인 앱은 목록 수집 대상이 아닙니다");
         }
-        if (lastAppId < 0 || lastAppId > SteamApp.MAX_APP_ID
+        if (lastAppId < 0 || lastAppId > SteamApiConstants.MAX_APP_ID
             || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
             throw new IllegalArgumentException("Steam 목록 커서 또는 페이지 크기가 범위를 벗어났습니다");
         }

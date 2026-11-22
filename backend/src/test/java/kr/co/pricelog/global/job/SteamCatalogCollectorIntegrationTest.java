@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import jakarta.persistence.EntityManager;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import java.util.OptionalLong;
 import java.util.concurrent.CyclicBarrier;
@@ -152,7 +153,7 @@ class SteamCatalogCollectorIntegrationTest {
             // given
             gameCatalogService.applyPage(GAME, List.of(new SteamApp(10, "First")), FIRST);
             when(steamAppListClient.getPage(GAME, 0, 10_000))
-                .thenReturn(new SteamAppPage(List.of(), OptionalLong.empty()));
+                .thenReturn(new SteamAppPage(Collections.emptyList(), OptionalLong.empty()));
             when(steamAppListClient.getPage(DLC, 0, 10_000))
                 .thenThrow(new RestClientException("원천 실패"));
 
@@ -265,7 +266,7 @@ class SteamCatalogCollectorIntegrationTest {
                     return lastPage(10, "본편");
                 });
             when(steamAppListClient.getPage(DLC, 0, PAGE_SIZE))
-                .thenReturn(new SteamAppPage(List.of(), OptionalLong.empty()));
+                .thenReturn(new SteamAppPage(Collections.emptyList(), OptionalLong.empty()));
 
             // when
             Throwable failure = catchThrowable(() -> steamCatalogCollector.collectAll(FIRST));
@@ -289,7 +290,7 @@ class SteamCatalogCollectorIntegrationTest {
             when(steamAppListClient.getPage(GAME, 0, PAGE_SIZE)).thenReturn(morePages(10));
             when(steamAppListClient.getPage(GAME, 10, PAGE_SIZE)).thenReturn(lastPage(20, "B"));
             when(steamAppListClient.getPage(DLC, 0, PAGE_SIZE))
-                .thenReturn(new SteamAppPage(List.of(), OptionalLong.empty()));
+                .thenReturn(new SteamAppPage(Collections.emptyList(), OptionalLong.empty()));
             jdbcTemplate.execute("""
                 ALTER TABLE pipeline_execution ADD CONSTRAINT test_fail_page
                 CHECK (list_cursor IS DISTINCT FROM 20)
