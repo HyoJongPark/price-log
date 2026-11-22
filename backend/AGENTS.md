@@ -21,7 +21,7 @@ Spring Boot 진입점 아래에서 업무 모델은 `domain`, 외부 시스템 �
 
 - Controller ↔ Service, Service ↔ Client 간 데이터 전달에는 DTO를 사용한다. 단순 값·ID·enum은 그대로 전달하며, 엔티티는 Service와 Repository에서 사용한다.
 
-원격 호출은 DB 트랜잭션 밖에서 수행한다. 같은 기록을 동시에 저장할 수 있으면 잠금, 중복 판정, 저장을 한 트랜잭션에서 보장한다. 스키마 변경은 Flyway와 엔티티 매핑을 함께 확인한다.
+DB에 쓰는 업무 단위는 서비스 클래스에 `@Transactional`을 붙이고, 그 서비스의 조회 전용 메서드는 `@Transactional(readOnly = true)`로 명시한다. 수집기는 원격 응답을 받은 뒤 서비스 빈을 호출한다. 저장소의 변경 쿼리는 서비스의 트랜잭션에 참여한다. 같은 기록을 동시에 저장할 수 있으면 중복 판정과 저장을 한 트랜잭션에서 보장한다. 스키마 변경은 Flyway와 엔티티 매핑을 함께 확인한다. [Spring Data JPA 트랜잭션 경계](https://docs.spring.io/spring-data/jpa/reference/jpa/transactions.html)
 
 JPA 엔티티는 `global/entity/BaseEntity`를 상속한다. Spring Data JPA Auditing으로 `createdAt`은 최초 저장 시 한 번, `updatedAt`은 생성과 실제 수정 시 기록한다. 관측 시각과 카탈로그 확인 시각은 도메인이 별도로 관리한다.
 
@@ -33,7 +33,9 @@ JPA 엔티티는 `global/entity/BaseEntity`를 상속한다. Spring Data JPA Aud
 
 ## 시각과 가독성
 
-- 관측·갱신·구간 시작처럼 타임라인의 한 시점을 표현하는 필드, 파라미터, 반환값은 `Instant`로 통일하고 PostgreSQL에는 `timestamptz`로 저장한다. 현재 시각은 주입한 `Clock`에서 읽는다. 한국 날짜·구간 계산과 화면 표시 경계에서만 `Asia/Seoul`을 적용한다. 시각 자체가 없는 출시일은 `LocalDate`, 경과 시간은 `Duration`으로 의미를 보존한다.
+- 관측·갱신·구간 시작처럼 타임라인의 한 시점을 표현하는 필드, 파라미터, 반환값은 `Instant`로 통일하고 PostgreSQL에는 `timestamptz`로 저장한다. 수집기는 페이지를 받은 뒤 `Instant.now()`로 관측 시각을 한 번 읽어 같은 페이지의 모든 행에 전달한다. 한국 날짜·구간 계산과 화면 표시 경계에서만 `Asia/Seoul`을 적용한다. 시각 자체가 없는 출시일은 `LocalDate`, 경과 시간은 `Duration`으로 의미를 보존한다.
 - Java 운영·테스트 코드의 지역 변수는 타입을 명시한다. 엔티티와 복합 키의 각 필드 사이에는 빈 줄을 둔다. 주입·매핑 애너테이션은 필드 선언 바로 윗줄에 쓴다.
-- 서비스·저장소에서는 같은 역할의 의존성을 붙여 쓰고, 상수·로거와 주입받는 빈처럼 성격이 바뀌면 한 줄을 비운다. 메서드에서도 입력 검증, 원격 호출, 응답 판정, 저장처럼 작업의 목적이 바뀌는 곳에서 문단을 나눈다.
+- 운영 코드와 테스트에서 의존성 필드와 생성자 인자는 `gameCatalogService`, `steamAppListClient`, `gameRepository`처럼 타입 이름을 lowerCamelCase로 쓴다. 같은 타입을 여럿 쓰면 이름에 각각의 역할을 드러낸다.
+- 서비스·저장소에서는 같은 역할의 의존성을 붙여 쓰고, 상수·로거와 주입받는 빈처럼 성격이 바뀌면 한 줄을 비운다.
+- 서비스 메서드는 작업의 목적이 바뀌는 곳에 빈 줄 하나를 둔다. 예를 들어 한 페이지의 앱 ID와 이름을 저장 인자로 만드는 두 줄은 붙이고, 실제 저장 호출 앞에서 문단을 나눈다. [Kent Beck의 Chunk Statements](https://www.oreilly.com/library/view/tidy-first/9781098151232/ch11.html) · [Google Java Style §4.6.1](https://google.github.io/styleguide/javaguide.html#s4.6.1-vertical-whitespace)
 - 로컬 리뷰에서 바뀐 타입의 소유자, 외부 호출과 트랜잭션의 경계, 문단별 의도를 확인한다. 새 린트 규칙은 위반 예제로 실패를 확인한 뒤 예제를 제거하고 빌드를 통과시킨다. Java 테스트 작성과 리뷰는 [테스트 판단 기준](../docs/testing.md)을 따른다.
