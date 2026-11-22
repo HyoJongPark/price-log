@@ -10,6 +10,7 @@ import kr.co.pricelog.global.client.steam.dto.SteamAppPage;
 import kr.co.pricelog.global.client.steam.enums.SteamAppType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.util.Assert;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -26,7 +27,8 @@ public class SteamAppListClient {
 
     /** 목록 API에서만 서버의 Web API 키로 인증한다. */
     public SteamAppListClient(RestClient.Builder restClientBuilder,
-                              @Value("${STEAM_WEB_API_KEY:}") String apiKey) {
+                              @Value("${STEAM_WEB_API_KEY}") String apiKey) {
+        Assert.hasText(apiKey, "STEAM_WEB_API_KEY에 빈 값을 사용할 수 없습니다");
         this.restClient = restClientBuilder.baseUrl("https://api.steampowered.com").build();
         this.apiKey = apiKey;
     }
@@ -37,9 +39,6 @@ public class SteamAppListClient {
         if (lastAppId < 0 || lastAppId > SteamApp.MAX_APP_ID
             || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
             throw new IllegalArgumentException("Steam 목록 커서 또는 페이지 크기가 범위를 벗어났습니다");
-        }
-        if (apiKey.isBlank()) {
-            throw new IllegalStateException("Steam 목록 조회에는 STEAM_WEB_API_KEY가 필요합니다");
         }
 
         String query = String.format(Locale.ROOT, PAGE_QUERY,

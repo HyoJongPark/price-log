@@ -124,18 +124,19 @@ class SteamAppListClientTest {
                 .hasMessageContaining("범위");
         }
 
-        @Test
-        @DisplayName("서버 키가 비어 있으면 인증 요청을 보내기 전에 설정 오류를 알린다")
-        void rejectsMissingApiKey() {
+        @ParameterizedTest
+        @ValueSource(strings = {"", "   "})
+        @DisplayName("Steam 키가 비어 있으면 클라이언트 생성 시 설정 오류를 알린다")
+        void rejectsBlankApiKeyAtStartup(String blankKey) {
             // given
-            SteamAppListClient clientWithoutApiKey = new SteamAppListClient(restClientBuilder, "");
+            RestClient.Builder builder = RestClient.builder();
 
             // when
             Throwable failure = catchThrowable(
-                () -> clientWithoutApiKey.getPage(SteamAppType.DLC, 0, 1));
+                () -> new SteamAppListClient(builder, blankKey));
 
             // then
-            assertThat(failure).isInstanceOf(IllegalStateException.class)
+            assertThat(failure).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("STEAM_WEB_API_KEY");
         }
 

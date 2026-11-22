@@ -59,7 +59,7 @@
 | `./gradlew test` | JUnit 테스트와 격리 DB 쓰기·조회 |
 | `./gradlew build` | 정적 검사·테스트를 포함한 전체 빌드와 JAR 생성 |
 
-Steam 카탈로그를 실제로 조회할 때는 Git에서 제외한 `backend/.env`에 `STEAM_WEB_API_KEY`를 설정한다. 단위 테스트는 고정 HTTP 응답을 사용한다.
+자동 테스트는 테스트용 키나 클라이언트 대역을 사용한다.
 
 프런트엔드 명령은 `frontend/`에서 `npm ci` 후 실행한다.
 
