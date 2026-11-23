@@ -36,6 +36,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @SpringBootTest(properties = "STEAM_WEB_API_KEY=test-key")
 class SteamStoreCollectorIntegrationTest {
 
+    private static final Instant SLOT = Instant.parse("2026-01-01T00:00:00Z");
+
     @Container
     @ServiceConnection
     static final PostgreSQLContainer<?> postgres =
@@ -68,7 +70,7 @@ class SteamStoreCollectorIntegrationTest {
             .thenReturn(new SteamPurchaseOptions(List.of(), null, true));
 
         // when
-        steamStoreCollector.collectPurchaseOptions(requestedAppId);
+        steamStoreCollector.collectPurchaseOptions(requestedAppId, SLOT);
 
         // then
         assertThat(freeFlag(requestedAppId)).isTrue();
@@ -89,11 +91,11 @@ class SteamStoreCollectorIntegrationTest {
             .thenReturn(new SteamPurchaseOptions(List.of(), null, null));
 
         // when
-        SteamPurchaseOptions result = steamStoreCollector.collectPurchaseOptions(steamAppId);
+        SteamPurchaseOptions result = steamStoreCollector.collectPurchaseOptions(steamAppId, SLOT);
         gameCatalogService.applyPage(GAME, List.of(new SteamApp(steamAppId, "새 이름")),
             catalogTime.plusSeconds(60));
         Throwable failure = catchThrowable(() -> steamStoreCollector.collectPurchaseOptions(
-            steamAppId));
+            steamAppId, SLOT));
 
         // then
         assertThat(result).isEqualTo(free);
@@ -103,10 +105,10 @@ class SteamStoreCollectorIntegrationTest {
               AND updated_at > catalog_updated_at
             """, String.class, steamAppId)).isEqualTo("새 이름");
 
-        steamStoreCollector.collectPurchaseOptions(steamAppId);
+        steamStoreCollector.collectPurchaseOptions(steamAppId, SLOT);
         assertThat(freeFlag(steamAppId)).isFalse();
 
-        steamStoreCollector.collectPurchaseOptions(steamAppId);
+        steamStoreCollector.collectPurchaseOptions(steamAppId, SLOT);
         assertThat(freeFlag(steamAppId)).isNull();
     }
 
@@ -114,12 +116,14 @@ class SteamStoreCollectorIntegrationTest {
     @DisplayName("게임별 구매 옵션 저장")
     class PurchaseOptions {
 
-        private final SteamPurchaseOption edition = new SteamPurchaseOption(PACKAGE, 31, "일반판");
-        private final SteamPurchaseOption bundle = new SteamPurchaseOption(BUNDLE, 31, null);
+        private final SteamPurchaseOption edition =
+            new SteamPurchaseOption(PACKAGE, 31, "일반판", null);
+        private final SteamPurchaseOption bundle = new SteamPurchaseOption(BUNDLE, 31, null, null);
 
         @BeforeEach
         void setUpGames() {
-            jdbcTemplate.execute("TRUNCATE TABLE game_purchase_option, purchase_option, game");
+            jdbcTemplate.execute(
+                "TRUNCATE price_history, game_purchase_option, purchase_option, game");
             gameCatalogService.applyPage(GAME, List.of(new SteamApp(301, "게임 A"),
                 new SteamApp(302, "게임 B")), Instant.now());
         }
@@ -130,16 +134,17 @@ class SteamStoreCollectorIntegrationTest {
             // given
             SteamPurchaseOptions options = new SteamPurchaseOptions(List.of(edition, bundle),
                 bundle, false);
-            SteamPurchaseOption renamedEdition = new SteamPurchaseOption(PACKAGE, 31, "스탠다드 에디션");
+            SteamPurchaseOption renamedEdition =
+                new SteamPurchaseOption(PACKAGE, 31, "스탠다드 에디션", null);
             SteamPurchaseOptions renamedOptions = new SteamPurchaseOptions(
                 List.of(renamedEdition, bundle), bundle, false);
             when(steamStoreClient.getPurchaseOptions(301)).thenReturn(options, renamedOptions);
-            steamStoreCollector.collectPurchaseOptions(301);
+            steamStoreCollector.collectPurchaseOptions(301, SLOT);
             List<Long> linkIds = jdbcTemplate.queryForList(
                 "SELECT id FROM game_purchase_option ORDER BY id", Long.class);
 
             // when
-            steamStoreCollector.collectPurchaseOptions(301);
+            steamStoreCollector.collectPurchaseOptions(301, SLOT);
 
             // then
             assertThat(activeOptions(301)).containsExactly("BUNDLE:31:true", "PACKAGE:31:false");
@@ -160,10 +165,10 @@ class SteamStoreCollectorIntegrationTest {
             SteamPurchaseOptions second = new SteamPurchaseOptions(List.of(bundle, edition),
                 bundle, false);
             when(steamStoreClient.getPurchaseOptions(301)).thenReturn(first, second);
-            steamStoreCollector.collectPurchaseOptions(301);
+            steamStoreCollector.collectPurchaseOptions(301, SLOT);
 
             // when
-            steamStoreCollector.collectPurchaseOptions(301);
+            steamStoreCollector.collectPurchaseOptions(301, SLOT);
 
             // then
             assertThat(activeOptions(301)).containsExactly("BUNDLE:31:true", "PACKAGE:31:false");
@@ -176,10 +181,10 @@ class SteamStoreCollectorIntegrationTest {
             when(steamStoreClient.getPurchaseOptions(301)).thenReturn(
                 new SteamPurchaseOptions(List.of(edition), edition, false),
                 new SteamPurchaseOptions(List.of(bundle), bundle, false));
-            steamStoreCollector.collectPurchaseOptions(301);
+            steamStoreCollector.collectPurchaseOptions(301, SLOT);
 
             // when
-            steamStoreCollector.collectPurchaseOptions(301);
+            steamStoreCollector.collectPurchaseOptions(301, SLOT);
 
             // then
             assertThat(activeOptions(301)).containsExactly("BUNDLE:31:true");
@@ -195,10 +200,10 @@ class SteamStoreCollectorIntegrationTest {
             when(steamStoreClient.getPurchaseOptions(301)).thenReturn(
                 new SteamPurchaseOptions(List.of(edition), edition, false),
                 new SteamPurchaseOptions(List.of(edition), null, false));
-            steamStoreCollector.collectPurchaseOptions(301);
+            steamStoreCollector.collectPurchaseOptions(301, SLOT);
 
             // when
-            steamStoreCollector.collectPurchaseOptions(301);
+            steamStoreCollector.collectPurchaseOptions(301, SLOT);
 
             // then
             assertThat(activeOptions(301)).containsExactly("PACKAGE:31:false");
@@ -213,11 +218,11 @@ class SteamStoreCollectorIntegrationTest {
             when(steamStoreClient.getPurchaseOptions(301)).thenReturn(options,
                 new SteamPurchaseOptions(List.of(), null, true));
             when(steamStoreClient.getPurchaseOptions(302)).thenReturn(options);
-            steamStoreCollector.collectPurchaseOptions(301);
-            steamStoreCollector.collectPurchaseOptions(302);
+            steamStoreCollector.collectPurchaseOptions(301, SLOT);
+            steamStoreCollector.collectPurchaseOptions(302, SLOT);
 
             // when
-            steamStoreCollector.collectPurchaseOptions(301);
+            steamStoreCollector.collectPurchaseOptions(301, SLOT);
 
             // then
             assertThat(activeOptions(301)).isEmpty();
@@ -242,7 +247,7 @@ class SteamStoreCollectorIntegrationTest {
                 new SteamPurchaseOptions(List.of(edition), edition, false));
 
             // when
-            steamStoreCollector.collectPurchaseOptions(301);
+            steamStoreCollector.collectPurchaseOptions(301, SLOT);
 
             // then
             assertThat(activeOptions(301)).containsExactly("PACKAGE:31:true");
@@ -260,7 +265,7 @@ class SteamStoreCollectorIntegrationTest {
 
             // when
             Throwable failure = catchThrowable(
-                () -> steamStoreCollector.collectPurchaseOptions(301));
+                () -> steamStoreCollector.collectPurchaseOptions(301, SLOT));
 
             // then
             assertThat(failure).isInstanceOf(IllegalStateException.class)
@@ -276,11 +281,11 @@ class SteamStoreCollectorIntegrationTest {
             when(steamStoreClient.getPurchaseOptions(301)).thenReturn(
                 new SteamPurchaseOptions(List.of(edition, bundle), edition, false))
                 .thenThrow(new RestClientException("구매 목록 조회 실패"));
-            steamStoreCollector.collectPurchaseOptions(301);
+            steamStoreCollector.collectPurchaseOptions(301, SLOT);
 
             // when
             Throwable failure = catchThrowable(
-                () -> steamStoreCollector.collectPurchaseOptions(301));
+                () -> steamStoreCollector.collectPurchaseOptions(301, SLOT));
 
             // then
             assertThat(failure).isInstanceOf(RestClientException.class).hasMessage("구매 목록 조회 실패");

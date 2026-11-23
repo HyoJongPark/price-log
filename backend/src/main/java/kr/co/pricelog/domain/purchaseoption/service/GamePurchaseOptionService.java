@@ -6,10 +6,12 @@ import java.util.List;
 import java.util.Map;
 import kr.co.pricelog.domain.game.entity.Game;
 import kr.co.pricelog.domain.game.repository.GameRepository;
+import kr.co.pricelog.domain.price.repository.PriceHistoryRepository;
 import kr.co.pricelog.domain.purchaseoption.entity.GamePurchaseOption;
 import kr.co.pricelog.domain.purchaseoption.entity.PurchaseOption;
 import kr.co.pricelog.domain.purchaseoption.repository.GamePurchaseOptionRepository;
 import kr.co.pricelog.domain.purchaseoption.repository.PurchaseOptionRepository;
+import kr.co.pricelog.global.client.steam.dto.SteamPrice;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOption;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
 import lombok.RequiredArgsConstructor;
@@ -25,9 +27,11 @@ public class GamePurchaseOptionService {
     private final GameRepository gameRepository;
     private final PurchaseOptionRepository purchaseOptionRepository;
     private final GamePurchaseOptionRepository gamePurchaseOptionRepository;
+    private final PriceHistoryRepository priceHistoryRepository;
 
     /** 성공한 응답에 있는 상품은 연결하고 목록에서 사라진 연결은 닫는다. */
-    public void applyPurchaseOptions(long steamAppId, SteamPurchaseOptions result) {
+    public void applyPurchaseOptions(long steamAppId, SteamPurchaseOptions result,
+                                     Instant slotAt, Instant observedAt) {
         Game game = gameRepository.findBySteamAppId(steamAppId)
             .orElseThrow(() -> new IllegalStateException("활성 카탈로그에 없는 Steam 앱: " + steamAppId));
         game.updateFreeToPlay(result.freeToPlay());
@@ -35,9 +39,22 @@ public class GamePurchaseOptionService {
         Map<PurchaseOption, Boolean> incomingOptions = new LinkedHashMap<>();
         for (SteamPurchaseOption steamOption : result.purchaseOptions()) {
             PurchaseOption purchaseOption = resolvePurchaseOption(steamOption);
+            recordPrice(purchaseOption, steamOption.price(), slotAt, observedAt);
             incomingOptions.put(purchaseOption, steamOption.equals(result.bestPurchaseOption()));
         }
-        updateGameLinks(game, incomingOptions);
+        updateGameLinks(game, incomingOptions, observedAt);
+    }
+
+    private void recordPrice(PurchaseOption option, SteamPrice price, Instant slotAt,
+                             Instant observedAt) {
+        if (price == null) {
+            return;
+        }
+        int inserted = priceHistoryRepository.recordPrice(option.getId(), slotAt, observedAt,
+            price.currentPrice(), price.regularPrice(), price.discountEndsAt());
+        if (inserted == 1) {
+            option.updatePrice(price, observedAt);
+        }
     }
 
     private PurchaseOption resolvePurchaseOption(SteamPurchaseOption option) {
@@ -49,8 +66,8 @@ public class GamePurchaseOptionService {
         return purchaseOption;
     }
 
-    private void updateGameLinks(Game game, Map<PurchaseOption, Boolean> incomingOptions) {
-        Instant observedAt = Instant.now();
+    private void updateGameLinks(Game game, Map<PurchaseOption, Boolean> incomingOptions,
+                                 Instant observedAt) {
         GamePurchaseOption retainedBest = null;
 
         List<GamePurchaseOption> activeLinks = gamePurchaseOptionRepository.findByGame(game);

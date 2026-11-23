@@ -22,7 +22,7 @@ public class Game extends BaseEntity {
     private Long id;
 
     @Column(nullable = false, unique = true)
-    private long steamAppId;
+    private Long steamAppId;
 
     @Column(nullable = false)
     private String name;

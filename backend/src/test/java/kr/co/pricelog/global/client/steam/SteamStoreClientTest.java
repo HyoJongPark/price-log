@@ -8,6 +8,9 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.time.Instant;
+import kr.co.pricelog.global.client.steam.dto.SteamPrice;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOption;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
 import org.junit.jupiter.api.DisplayName;
@@ -50,7 +53,7 @@ class SteamStoreClientTest {
             // then
             assertThat(result.freeToPlay()).isEqualTo(expectedFlag);
             assertThat(result.purchaseOptions()).containsExactly(
-                new SteamPurchaseOption(PACKAGE, 201, "추가 상품"));
+                new SteamPurchaseOption(PACKAGE, 201, "추가 상품", null));
         }
 
         @Test
@@ -86,11 +89,11 @@ class SteamStoreClientTest {
 
             // then
             assertThat(result.purchaseOptions()).containsExactlyInAnyOrder(
-                new SteamPurchaseOption(PACKAGE, 201, "기본판"),
-                new SteamPurchaseOption(PACKAGE, 202, "디럭스판"),
-                new SteamPurchaseOption(BUNDLE, 201, "합본"));
+                new SteamPurchaseOption(PACKAGE, 201, "기본판", null),
+                new SteamPurchaseOption(PACKAGE, 202, "디럭스판", null),
+                new SteamPurchaseOption(BUNDLE, 201, "합본", null));
             assertThat(result.bestPurchaseOption())
-                .isEqualTo(new SteamPurchaseOption(BUNDLE, 201, "합본"));
+                .isEqualTo(new SteamPurchaseOption(BUNDLE, 201, "합본", null));
             mockRestServiceServer.verify();
         }
 
@@ -111,10 +114,10 @@ class SteamStoreClientTest {
 
             // then
             assertThat(result.purchaseOptions()).containsExactlyInAnyOrder(
-                new SteamPurchaseOption(PACKAGE, 42, null),
-                new SteamPurchaseOption(BUNDLE, 43, "합본"));
+                new SteamPurchaseOption(PACKAGE, 42, null, null),
+                new SteamPurchaseOption(BUNDLE, 43, "합본", null));
             assertThat(result.bestPurchaseOption())
-                .isEqualTo(new SteamPurchaseOption(PACKAGE, 42, null));
+                .isEqualTo(new SteamPurchaseOption(PACKAGE, 42, null, null));
         }
 
         @Test
@@ -130,7 +133,7 @@ class SteamStoreClientTest {
 
             // then
             assertThat(result.purchaseOptions())
-                .containsExactly(new SteamPurchaseOption(PACKAGE, 42, null));
+                .containsExactly(new SteamPurchaseOption(PACKAGE, 42, null, null));
             assertThat(result.bestPurchaseOption()).isNull();
         }
 
@@ -217,6 +220,37 @@ class SteamStoreClientTest {
             assertThat(failure).isInstanceOf(RestClientException.class)
                 .hasRootCauseMessage(expectedReason);
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "{}",
+        "{\"final_price_in_cents\":0}",
+        "{\"final_price_in_cents\":1200,\"formatted_final_price\":\"$12\"}",
+        "{\"formatted_final_price\":\"₩ -1\"}",
+        "{\"formatted_final_price\":\"₩ 9223372036854775808\"}",
+        "{\"final_price_in_cents\":0,\"formatted_final_price\":\"₩ 0\",\"is_free_license\":true}",
+        "{\"final_price_in_cents\":0,\"formatted_final_price\":\"₩ 0\",\"recurrence_info\":{}}"})
+    @DisplayName("미확인 금액·무료 라이선스·정기 결제는 옵션을 유지하고 해당 가격만 비운다")
+    void keepsOptionWithoutEligiblePrice(String fields) throws Exception {
+        // given
+        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectNode option = (ObjectNode) objectMapper.readTree(fields);
+        option.put("bundleid", 31);
+        respondWithItems("""
+            [{"id":101,"item_type":0,"success":1,"purchase_options":[%s,{"packageid":31,
+              "formatted_final_price":"₩ 9,420",
+              "original_price_in_cents":"1","formatted_original_price":"₩ 62,800",
+              "active_discounts":[{"discount_end_date":1796234400}]}]}]
+            """.formatted(option));
+
+        // when
+        SteamPurchaseOptions result = steamStoreClient.getPurchaseOptions(101);
+
+        // then
+        assertThat(result.purchaseOptions()).containsExactly(new SteamPurchaseOption(
+            BUNDLE, 31, null, null), new SteamPurchaseOption(PACKAGE, 31, null,
+                new SteamPrice(9420, 62800L, Instant.ofEpochSecond(1796234400))));
     }
 
     private void respondWithItems(String items) {
