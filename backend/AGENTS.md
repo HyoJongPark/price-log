@@ -7,8 +7,9 @@ Spring Boot 진입점 아래에서 업무 모델은 `domain`, 외부 시스템 �
 | 기능 구현 시 위치 | 맡는 일 |
 | --- | --- |
 | `domain/collection` | 수집 회차의 재개·완료, 페이지 결과와 커서를 함께 저장하는 트랜잭션 |
-| `domain/game` | 게임·판매 패키지, 추적 대상과 카탈로그 갱신 |
-| `domain/price` | 한국 원화 가격과 패키지별 가격 이력 |
+| `domain/game` | 본편·DLC 식별, 게임 카탈로그 갱신 |
+| `domain/purchaseoption` | Steam 판매 상품(패키지·번들), 게임별 구매 옵션 연결과 대표 옵션 지정 |
+| `domain/price` | 한국 원화 가격과 판매 상품별 가격 이력 |
 | `domain/playercount` | 게임별 동시 접속자 이력 |
 | `global/job` | 예약 실행, 관측 구간, 대상별 호출 순서와 실패 격리 |
 | `global/client/<공급자>` | HTTP 연결, 인증, 응답 검증. 연동 결과 타입은 해당 공급자의 `dto`에 둔다. |
@@ -24,6 +25,8 @@ Spring Boot 진입점 아래에서 업무 모델은 `domain`, 외부 시스템 �
 
 DB에 쓰는 업무 단위는 서비스 클래스에 `@Transactional`을 붙이고, 그 서비스의 조회 전용 메서드는 `@Transactional(readOnly = true)`로 명시한다. 수집기는 원격 응답을 받은 뒤 서비스 빈을 호출한다. 저장소의 변경 쿼리는 서비스의 트랜잭션에 참여한다. 같은 기록을 동시에 저장할 수 있으면 중복 판정과 저장을 한 트랜잭션에서 보장한다. 스키마 변경은 Flyway와 엔티티 매핑을 함께 확인한다. [Spring Data JPA 트랜잭션 경계](https://docs.spring.io/spring-data/jpa/reference/jpa/transactions.html)
 
+명시적 락은 같은 데이터를 동시에 변경하는 실행 경로가 있고, 트랜잭션과 DB 제약만으로는 필요한 동작을 보장하기 어려울 때 사용한다.
+
 JPA 엔티티는 `global/entity/BaseEntity`를 상속한다. Spring Data JPA Auditing으로 `createdAt`은 최초 저장 시 한 번, `updatedAt`은 생성과 실제 수정 시 기록한다. 관측 시각과 카탈로그 확인 시각은 도메인이 별도로 관리한다.
 
 ## 외부 API 클라이언트
@@ -36,6 +39,9 @@ JPA 엔티티는 `global/entity/BaseEntity`를 상속한다. Spring Data JPA Aud
 
 - 관측·갱신·구간 시작처럼 타임라인의 한 시점을 표현하는 필드, 파라미터, 반환값은 `Instant`로 통일하고 PostgreSQL에는 `timestamptz`로 저장한다. 수집기는 페이지를 받은 뒤 `Instant.now()`로 관측 시각을 한 번 읽어 같은 페이지의 모든 행에 전달한다. 한국 날짜·구간 계산과 화면 표시 경계에서만 `Asia/Seoul`을 적용한다. 시각 자체가 없는 출시일은 `LocalDate`, 경과 시간은 `Duration`으로 의미를 보존한다.
 - Java 운영·테스트 코드의 지역 변수는 타입을 명시한다. 엔티티와 복합 키의 각 필드 사이에는 빈 줄을 둔다. 주입·매핑 애너테이션은 필드 선언 바로 윗줄에 쓴다.
+- 타입 선언의 애너테이션은 한 줄에 하나씩 쓴다. 한 줄짜리 애너테이션끼리는 인자를 포함해 짧은 줄부터 배치하고, 길이가 같으면 기존 순서를 유지한다. 여러 줄짜리 애너테이션 전후는 각각 정렬한다.
+- 단순 getter는 클래스 수준 `@Getter`로 생성할 수 있다. 필요한 setter는 메서드로 직접 작성한다.
+- 초기화되지 않은 `final` 필드를 그대로 받는 생성자는 `@RequiredArgsConstructor`로 생성한다. JPA용 기본 생성자를 명시할 때는 `@NoArgsConstructor(access = AccessLevel.PROTECTED)`를 쓴다. 입력 검증·변환이 필요하거나 엔티티 생성 시 받을 필드를 제한해야 하면 생성자를 직접 작성한다.
 - 운영 코드와 테스트에서 의존성 필드와 생성자 인자는 `gameCatalogService`, `steamAppListClient`, `gameRepository`처럼 타입 이름을 lowerCamelCase로 쓴다. 같은 타입을 여럿 쓰면 이름에 각각의 역할을 드러낸다.
 - 서비스·저장소에서는 같은 역할의 의존성을 붙여 쓰고, 상수·로거와 주입받는 빈처럼 성격이 바뀌면 한 줄을 비운다.
 - 서비스 메서드는 작업의 목적이 바뀌는 곳에 빈 줄 하나를 둔다. 예를 들어 한 페이지의 앱 ID와 이름을 저장 인자로 만드는 두 줄은 붙이고, 실제 저장 호출 앞에서 문단을 나눈다. [Kent Beck의 Chunk Statements](https://www.oreilly.com/library/view/tidy-first/9781098151232/ch11.html) · [Google Java Style §4.6.1](https://google.github.io/styleguide/javaguide.html#s4.6.1-vertical-whitespace)

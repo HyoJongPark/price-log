@@ -50,10 +50,17 @@ tasks.named('test') {
     useJUnitPlatform()
 }
 
+def compileCheckstyleRules = tasks.register('compileCheckstyleRules', JavaCompile) {
+    source = fileTree('config/checkstyle/src') { include '**/*.java' }
+    classpath = configurations.checkstyle
+    destinationDirectory = layout.buildDirectory.dir('checkstyle-rules')
+}
+
 def conventions = tasks.register('checkstyleConventions', Checkstyle) {
     description = 'Checks project Java conventions in production and test sources.'
     source(sourceSets.main.allJava, sourceSets.test.allJava)
     classpath = files()
+    checkstyleClasspath += files(compileCheckstyleRules)
     config = resources.text.fromFile('config/checkstyle/conventions.xml')
 }
 

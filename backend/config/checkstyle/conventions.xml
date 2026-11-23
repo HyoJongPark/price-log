@@ -12,6 +12,9 @@
       <property name="query" value="//TYPE/IDENT[@text='var']"/>
       <message key="matchxpath.match" value="Declare the local variable type explicitly."/>
     </module>
+    <module name="pricelog.checkstyle.AnnotationLengthOrderCheck">
+      <message key="annotation.length.order" value="Place shorter type annotations before longer ones (including arguments)."/>
+    </module>
     <module name="MatchXpath">
       <property name="query" value="//*[self::CLASS_DEF or self::RECORD_DEF][MODIFIERS/ANNOTATION//IDENT[@text=('Entity','Embeddable','MappedSuperclass')]]/(OBJBLOCK/VARIABLE_DEF|RECORD_COMPONENTS/RECORD_COMPONENT_DEF)/TYPE//IDENT[@text=('LocalDateTime','ZonedDateTime','OffsetDateTime','Date','Timestamp','Calendar')]"/>
       <message key="matchxpath.match" value="Use Instant for persisted points in time."/>

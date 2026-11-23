@@ -8,23 +8,18 @@ import kr.co.pricelog.domain.collection.repository.PipelineExecutionRepository;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.domain.game.service.GameCatalogService;
 import kr.co.pricelog.global.client.steam.dto.SteamAppPage;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Steam 목록 수집을 재개하고 페이지의 게임과 처리 위치를 함께 커밋한다. */
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class SteamCatalogCollectionService {
 
     private final PipelineExecutionRepository pipelineExecutionRepository;
     private final GameCatalogService gameCatalogService;
-
-    /** 회차 저장소와 게임 카탈로그 서비스를 받는다. */
-    public SteamCatalogCollectionService(PipelineExecutionRepository pipelineExecutionRepository,
-                                        GameCatalogService gameCatalogService) {
-        this.pipelineExecutionRepository = pipelineExecutionRepository;
-        this.gameCatalogService = gameCatalogService;
-    }
 
     /** 처음이면 0, 재실행이면 DB에 커밋된 커서, 완료했으면 빈 값을 반환한다. */
     public OptionalLong resumeCursor(SteamAppType type, Instant scheduledAt) {
