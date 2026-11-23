@@ -7,7 +7,10 @@ import java.util.Objects;
 
 /** 상점 조회 결과의 대상과 그 상품에서 선택할 수 있는 구매 옵션. */
 public record SteamStoreItem(long id, int success, @JsonProperty("item_type") Integer itemType,
-                             @JsonProperty("purchase_options") List<SteamPurchaseOption> options) {
+                             @JsonProperty("is_free") Boolean freeToPlay,
+                             @JsonProperty("purchase_options") List<SteamPurchaseOption> options,
+                             @JsonProperty("best_purchase_option")
+                             SteamPurchaseOption bestPurchaseOption) {
 
     private static final int APP_ITEM_TYPE = 0;
     private static final int SUCCESS = 1;

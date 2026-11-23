@@ -1,9 +1,8 @@
 package kr.co.pricelog.global.client.steam;
 
-import java.util.List;
 import java.util.Locale;
 import kr.co.pricelog.global.client.steam.constants.SteamApiConstants;
-import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOption;
+import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
 import kr.co.pricelog.global.client.steam.dto.SteamStoreItem;
 import kr.co.pricelog.global.client.steam.dto.SteamStoreResponse;
 import org.springframework.stereotype.Component;
@@ -26,8 +25,8 @@ public class SteamStoreClient {
         this.restClient = restClientBuilder.baseUrl(SteamApiConstants.BASE_URL).build();
     }
 
-    /** 본편의 Steam 앱 ID로 한국 상점의 패키지와 번들 구매 옵션을 읽는다. */
-    public List<SteamPurchaseOption> getPurchaseOptions(long steamAppId) {
+    /** 본편의 Steam 앱 ID로 한국 상점의 전체 구매 옵션과 Steam이 지정한 기본 옵션을 읽는다. */
+    public SteamPurchaseOptions getPurchaseOptions(long steamAppId) {
         if (steamAppId <= 0 || steamAppId > SteamApiConstants.MAX_APP_ID) {
             throw new IllegalArgumentException("Steam 앱 ID가 범위를 벗어났습니다");
         }
@@ -45,6 +44,7 @@ public class SteamStoreClient {
         if (item == null || !item.isAppResultFor(steamAppId)) {
             throw new RestClientException("Steam 상점이 요청한 앱의 구매 옵션을 확인하지 못했습니다");
         }
-        return item.options();
+        return new SteamPurchaseOptions(item.options(), item.bestPurchaseOption(),
+            item.freeToPlay());
     }
 }

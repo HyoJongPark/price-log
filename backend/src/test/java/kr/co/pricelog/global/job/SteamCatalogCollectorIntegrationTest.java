@@ -98,7 +98,7 @@ class SteamCatalogCollectorIntegrationTest {
                 """, String.class)).containsExactly("10/GAME/Counter-Strike",
                     "20/GAME/Team Fortress Classic", "660/DLC/Portal 2 MotionPack");
             assertThat(jdbcTemplate.queryForObject("""
-                SELECT count(*) FROM game WHERE sale_status = 'unknown' AND parent_game_id IS NULL
+                SELECT count(*) FROM game WHERE is_free IS NULL AND parent_game_id IS NULL
                   AND detail_checked_at IS NULL AND updated_at = created_at
                 """, Integer.class)).isEqualTo(3);
         }
@@ -110,8 +110,9 @@ class SteamCatalogCollectorIntegrationTest {
             gameCatalogService.applyPage(GAME, List.of(new SteamApp(10, "본편")), FIRST);
             gameCatalogService.applyPage(DLC, List.of(new SteamApp(20, "DLC")), FIRST);
             jdbcTemplate.update("""
-                INSERT INTO game (steam_app_id, name, app_type, created_at, updated_at)
-                VALUES (30, '미확인', 'UNKNOWN', now(), now())
+                INSERT INTO game
+                    (steam_app_id, name, app_type, catalog_updated_at, created_at, updated_at)
+                VALUES (30, '미확인', 'UNKNOWN', now(), now(), now())
                 """);
 
             // when
@@ -124,13 +125,13 @@ class SteamCatalogCollectorIntegrationTest {
         }
 
         @Test
-        @DisplayName("이름이 바뀌면 같은 행을 갱신하고 한국 판매 상태와 상세를 보존한다")
+        @DisplayName("이름이 바뀌면 같은 행을 갱신하고 무료 표기와 상세를 보존한다")
         void updatesNameAndKeepsStoreDetails() {
             // given
             gameCatalogService.applyPage(GAME, List.of(new SteamApp(10, "Old")), FIRST);
             final Long originalId = jdbcTemplate.queryForObject("SELECT id FROM game", Long.class);
             jdbcTemplate.update("""
-                UPDATE game SET sale_status = 'base_available', description = '상세',
+                UPDATE game SET is_free = true, description = '상세',
                     detail_checked_at = created_at, search_aliases = ARRAY['별칭']
                 """);
 
@@ -140,7 +141,7 @@ class SteamCatalogCollectorIntegrationTest {
             // then
             assertThat(jdbcTemplate.queryForObject("""
                 SELECT id FROM game WHERE steam_app_id = 10 AND name = 'New'
-                  AND sale_status = 'base_available' AND description = '상세'
+                  AND is_free = true AND description = '상세'
                   AND detail_checked_at = created_at AND search_aliases = ARRAY['별칭','Old']
                   AND created_at = ? AND updated_at = ?
                 """, Long.class, Timestamp.from(FIRST), Timestamp.from(NEXT)))
