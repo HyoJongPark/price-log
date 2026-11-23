@@ -22,4 +22,9 @@ public abstract class BaseEntity {
     private Instant updatedAt;
 
     private Instant deletedAt;
+
+    /** 이 행의 활성 구간을 닫는다. */
+    public void markDeleted(Instant deletedAt) {
+        this.deletedAt = deletedAt;
+    }
 }

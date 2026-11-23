@@ -1,0 +1,16 @@
+ALTER TABLE steam_offer RENAME TO purchase_option;
+ALTER TABLE purchase_option RENAME COLUMN offer_type TO type;
+ALTER TABLE purchase_option RENAME CONSTRAINT steam_offer_pkey TO purchase_option_pkey;
+ALTER TABLE purchase_option RENAME CONSTRAINT steam_offer_offer_type_check TO purchase_option_type_check;
+ALTER TABLE purchase_option RENAME CONSTRAINT steam_offer_steam_id_check TO purchase_option_steam_id_check;
+ALTER INDEX steam_offer_active_key RENAME TO purchase_option_active_key;
+ALTER SEQUENCE steam_offer_id_seq RENAME TO purchase_option_id_seq;
+
+ALTER TABLE game_offer RENAME TO game_purchase_option;
+ALTER TABLE game_purchase_option RENAME COLUMN offer_id TO purchase_option_id;
+ALTER TABLE game_purchase_option RENAME CONSTRAINT game_offer_pkey TO game_purchase_option_pkey;
+ALTER TABLE game_purchase_option RENAME CONSTRAINT game_offer_game_id_fkey TO game_purchase_option_game_id_fkey;
+ALTER TABLE game_purchase_option RENAME CONSTRAINT game_offer_offer_id_fkey TO game_purchase_option_purchase_option_id_fkey;
+ALTER INDEX game_offer_active_key RENAME TO game_purchase_option_active_key;
+ALTER INDEX game_offer_one_best RENAME TO game_purchase_option_one_best;
+ALTER SEQUENCE game_offer_id_seq RENAME TO game_purchase_option_id_seq;

@@ -18,7 +18,15 @@
 
 카탈로그에서 얻은 앱 ID를 `SteamStoreClient.getPurchaseOptions(steamAppId)`에 전달하면 한국 상점의 구매 옵션 목록(`purchaseOptions`)과 Steam이 지정한 기본 옵션(`bestPurchaseOption`)을 받는다. 패키지와 번들은 같은 숫자 ID를 쓸 수 있어 종류와 ID를 함께 비교한다. 이름이 없는 상품도 ID로 식별한다.
 
-기본 지정이 생략되면 전체 목록을 반환하고 `bestPurchaseOption`은 `null`이다. 옵션이 하나인 경우에도 같다. Steam이 기본값을 지정했는데 같은 종류·ID의 항목이 없거나 둘 이상이면 조회가 실패한다. 앱의 무료 표기와 각 상품의 종류·ID·이름을 읽는다. 체크리스트 6번에서는 전체 목록을 게임별로 연결하고, 대응한 한 건에만 `game_offer.is_best_option`을 지정할 예정이다. 기본 지정이 없는 정상 응답은 해당 게임의 모든 옵션을 false로 반영한다.
+기본 지정이 생략되면 전체 목록을 반환하고 `bestPurchaseOption`은 `null`이다. 옵션이 하나인 경우에도 같다. Steam이 기본값을 지정했는데 같은 종류·ID의 항목이 없거나 둘 이상이면 조회가 실패한다. 앱의 무료 표기와 각 상품의 종류·ID·이름을 읽는다.
+
+## 게임별 구매 옵션 저장
+
+`SteamStoreCollector.collectPurchaseOptions(steamAppId)`가 성공하면 같은 트랜잭션에서 무료 표기와 구매 옵션을 저장한다. `purchase_option`은 종류(PACKAGE·BUNDLE)와 Steam ID로 활성 판매 상품을 식별한다. 여러 게임이 같은 상품을 팔면 상품 한 행을 공유하고, `game_purchase_option`은 `game_id`와 `purchase_option_id`로 게임과 구매 옵션을 다대다로 연결한다.
+
+`game_purchase_option.is_best_option`은 Steam이 해당 게임에서 지정한 옵션 한 건에만 true다. 정상 응답에서 기본 지정이 생략되면 대표 선택을 해제한다. 목록에서 빠진 상품은 해당 게임의 연결만 닫는다. 조회가 실패하거나 지정된 옵션을 목록에서 식별할 수 없으면 마지막 성공 상태를 유지한다.
+
+게임·구매 옵션·게임별 연결은 일반 JPA 조회에서 활성 행만 반환한다. 수집기가 연결을 닫으면 그 행에 종료 시각이 남는다. 종료된 구간의 이력을 직접 SQL로 읽을 때는 조회 목적에 맞게 `deleted_at` 조건을 지정한다.
 
 ## 무료 플레이와 상품 가격의 기준
 

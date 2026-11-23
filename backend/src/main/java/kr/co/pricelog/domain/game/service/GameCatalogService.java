@@ -2,31 +2,20 @@ package kr.co.pricelog.domain.game.service;
 
 import java.time.Instant;
 import java.util.List;
-import kr.co.pricelog.domain.game.entity.Game;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.domain.game.repository.GameRepository;
 import kr.co.pricelog.global.client.steam.dto.SteamApp;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Steam에서 확인한 앱의 이름과 종류를 게임 카탈로그에 반영한다. */
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class GameCatalogService {
 
     private final GameRepository gameRepository;
-
-    /** 게임 카탈로그 저장소를 받는다. */
-    public GameCatalogService(GameRepository gameRepository) {
-        this.gameRepository = gameRepository;
-    }
-
-    /** 카탈로그에 등록된 앱에 한국 상점의 무료 표기를 기록한다. */
-    public void updateFreeToPlay(long steamAppId, Boolean freeToPlay) {
-        Game game = gameRepository.findBySteamAppIdAndDeletedAtIsNull(steamAppId)
-            .orElseThrow(() -> new IllegalStateException("활성 카탈로그에 없는 Steam 앱: " + steamAppId));
-        game.updateFreeToPlay(freeToPlay);
-    }
 
     /** 목록에서 확인한 종류와 이름만 관측 시각 기준으로 갱신한다. */
     public void applyPage(SteamAppType type, List<SteamApp> apps, Instant observedAt) {

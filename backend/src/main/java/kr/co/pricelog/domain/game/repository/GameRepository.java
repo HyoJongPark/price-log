@@ -13,7 +13,7 @@ import org.springframework.data.repository.query.Param;
 public interface GameRepository extends Repository<Game, Long> {
 
     /** 상점 응답을 반영할 활성 카탈로그 항목을 조회한다. */
-    Optional<Game> findBySteamAppIdAndDeletedAtIsNull(long steamAppId);
+    Optional<Game> findBySteamAppId(long steamAppId);
 
     /** 같은 앱이 겹치면 목록에서 얻은 필드만 갱신한다. */
     @Modifying

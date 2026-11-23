@@ -10,11 +10,11 @@ import jakarta.persistence.Id;
 import java.time.Instant;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.global.entity.BaseEntity;
-import org.hibernate.annotations.DynamicUpdate;
+import org.hibernate.annotations.SQLRestriction;
 
 /** Steam 앱 번호로 식별하는 카탈로그 항목. */
 @Entity
-@DynamicUpdate
+@SQLRestriction("deleted_at IS NULL")
 public class Game extends BaseEntity {
 
     @Id
