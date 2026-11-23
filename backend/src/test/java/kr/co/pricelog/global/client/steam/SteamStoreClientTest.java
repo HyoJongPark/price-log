@@ -3,13 +3,14 @@ package kr.co.pricelog.global.client.steam;
 import static kr.co.pricelog.global.client.steam.enums.SteamPurchaseOptionType.BUNDLE;
 import static kr.co.pricelog.global.client.steam.enums.SteamPurchaseOptionType.PACKAGE;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.anything;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import kr.co.pricelog.global.client.steam.dto.SteamPrice;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOption;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
@@ -21,16 +22,18 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
 class SteamStoreClientTest {
 
     private final RestClient.Builder restClientBuilder = RestClient.builder();
     private final MockRestServiceServer mockRestServiceServer =
         MockRestServiceServer.bindTo(restClientBuilder).build();
-    private final SteamStoreClient steamStoreClient = new SteamStoreClient(restClientBuilder);
+    private final ObjectMapper objectMapper = Jackson2ObjectMapperBuilder.json().build();
+    private final SteamStoreClient steamStoreClient = new SteamStoreClient(restClientBuilder,
+        objectMapper);
 
     @Nested
     @DisplayName("한국 상점의 본편 구매 옵션 조회")
@@ -48,7 +51,8 @@ class SteamStoreClientTest {
                 """.formatted(sourceFlag));
 
             // when
-            SteamPurchaseOptions result = steamStoreClient.getPurchaseOptions(101);
+            SteamPurchaseOptions result = steamStoreClient
+                .getPurchaseOptions(List.of(101L)).get(101L);
 
             // then
             assertThat(result.freeToPlay()).isEqualTo(expectedFlag);
@@ -60,7 +64,6 @@ class SteamStoreClientTest {
         @DisplayName("동일한 숫자 ID의 패키지와 번들 중 Steam이 지정한 번들을 목록에서 찾는다")
         void readsKoreanPurchaseOptions() {
             // given
-            ObjectMapper objectMapper = new ObjectMapper();
             String response = """
                 {"response":{"store_items":[{"item_type":0,"id":101,"success":1,
                  "best_purchase_option":{"bundleid":201},
@@ -85,7 +88,8 @@ class SteamStoreClientTest {
             }).andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
 
             // when
-            SteamPurchaseOptions result = steamStoreClient.getPurchaseOptions(101);
+            SteamPurchaseOptions result = steamStoreClient
+                .getPurchaseOptions(List.of(101L)).get(101L);
 
             // then
             assertThat(result.purchaseOptions()).containsExactlyInAnyOrder(
@@ -110,7 +114,8 @@ class SteamStoreClientTest {
                 """.formatted(unnamedOption));
 
             // when
-            SteamPurchaseOptions result = steamStoreClient.getPurchaseOptions(101);
+            SteamPurchaseOptions result = steamStoreClient
+                .getPurchaseOptions(List.of(101L)).get(101L);
 
             // then
             assertThat(result.purchaseOptions()).containsExactlyInAnyOrder(
@@ -129,7 +134,8 @@ class SteamStoreClientTest {
                 """);
 
             // when
-            SteamPurchaseOptions result = steamStoreClient.getPurchaseOptions(101);
+            SteamPurchaseOptions result = steamStoreClient
+                .getPurchaseOptions(List.of(101L)).get(101L);
 
             // then
             assertThat(result.purchaseOptions())
@@ -146,7 +152,8 @@ class SteamStoreClientTest {
                 """);
 
             // when
-            SteamPurchaseOptions result = steamStoreClient.getPurchaseOptions(570);
+            SteamPurchaseOptions result = steamStoreClient
+                .getPurchaseOptions(List.of(570L)).get(570L);
 
             // then
             assertThat(result.purchaseOptions()).isEmpty();
@@ -164,7 +171,7 @@ class SteamStoreClientTest {
             "[{\"packageid\":43}]",
             "[{\"bundleid\":42}]",
             "[{\"packageid\":42},{\"packageid\":42}]"})
-        @DisplayName("지정한 종류와 ID에 해당하는 구매 옵션이 없거나 여러 건이면 실패한다")
+        @DisplayName("지정한 종류와 ID에 해당하는 구매 옵션이 없거나 여러 건이면 해당 앱을 제외한다")
         void rejectsUnmatchedBestOption(String options) {
             // given
             respondWithItems("""
@@ -173,52 +180,50 @@ class SteamStoreClientTest {
                 """.formatted(options));
 
             // when
-            Throwable failure = catchThrowable(() -> steamStoreClient.getPurchaseOptions(101));
+            Map<Long, SteamPurchaseOptions> result = steamStoreClient.getPurchaseOptions(
+                List.of(101L));
 
             // then
-            assertThat(failure).isInstanceOf(RestClientException.class)
-                .hasMessage("Steam 기본 구매 옵션을 구매 목록의 한 상품에 대응할 수 없습니다");
+            assertThat(result).isEmpty();
         }
 
         @ParameterizedTest
-        @CsvSource(delimiter = '|', textBlock = """
-            [] | Steam 상점의 단건 조회 결과가 누락되거나 중복되었습니다
-            [{"item_type":0,"id":10,"success":1}]  | Steam 상점이 요청한 앱의 구매 옵션을 확인하지 못했습니다
-            [{"item_type":1,"id":570,"success":1}] | Steam 상점이 요청한 앱의 구매 옵션을 확인하지 못했습니다
-            [{"item_type":0,"id":570,"success":2}] | Steam 상점이 요청한 앱의 구매 옵션을 확인하지 못했습니다
-            """)
+        @ValueSource(strings = {
+            "[]",
+            "[{\"item_type\":0,\"id\":10,\"success\":1}]",
+            "[{\"item_type\":1,\"id\":570,\"success\":1}]",
+            "[{\"item_type\":0,\"id\":570,\"success\":2}]"})
         @DisplayName("결과 누락·앱 ID 불일치·다른 상품 종류·조회 실패를 빈 옵션과 구분한다")
-        void rejectsUnconfirmedApp(String items, String expectedReason) {
+        void rejectsUnconfirmedApp(String items) {
             // given
             respondWithItems(items);
 
             // when
-            Throwable failure = catchThrowable(() -> steamStoreClient.getPurchaseOptions(570));
+            Map<Long, SteamPurchaseOptions> result = steamStoreClient.getPurchaseOptions(
+                List.of(570L));
 
             // then
-            assertThat(failure).isInstanceOf(RestClientException.class)
-                .hasMessage(expectedReason);
+            assertThat(result).isEmpty();
         }
 
         @ParameterizedTest
-        @CsvSource(delimiter = '|', textBlock = """
-            {}                             | Steam 구매 옵션에 패키지 또는 번들 ID 하나가 필요합니다
-            {"packageid":42,"bundleid":42} | Steam 구매 옵션에 패키지 또는 번들 ID 하나가 필요합니다
-            {"packageid":0}                | Steam 구매 옵션의 종류 또는 ID가 유효하지 않습니다
-            """)
-        @DisplayName("상품 ID가 누락·중복·무효이면 조회에 실패한다")
-        void rejectsIncompleteOption(String option, String expectedReason) {
+        @ValueSource(strings = {
+            "{}",
+            "{\"packageid\":42,\"bundleid\":42}",
+            "{\"packageid\":0}"})
+        @DisplayName("상품 ID가 누락·중복·무효이면 해당 앱을 제외한다")
+        void rejectsIncompleteOption(String option) {
             // given
             respondWithItems("""
                 [{"item_type":0,"id":570,"success":1,"purchase_options":[%s]}]
                 """.formatted(option));
 
             // when
-            Throwable failure = catchThrowable(() -> steamStoreClient.getPurchaseOptions(570));
+            Map<Long, SteamPurchaseOptions> result = steamStoreClient.getPurchaseOptions(
+                List.of(570L));
 
             // then
-            assertThat(failure).isInstanceOf(RestClientException.class)
-                .hasRootCauseMessage(expectedReason);
+            assertThat(result).isEmpty();
         }
     }
 
@@ -245,12 +250,42 @@ class SteamStoreClientTest {
             """.formatted(option));
 
         // when
-        SteamPurchaseOptions result = steamStoreClient.getPurchaseOptions(101);
+        SteamPurchaseOptions result = steamStoreClient
+            .getPurchaseOptions(List.of(101L)).get(101L);
 
         // then
         assertThat(result.purchaseOptions()).containsExactly(new SteamPurchaseOption(
             BUNDLE, 31, null, null), new SteamPurchaseOption(PACKAGE, 31, null,
                 new SteamPrice(9420, 62800L, Instant.ofEpochSecond(1796234400))));
+    }
+
+    @Test
+    @DisplayName("한 요청에서 확인된 앱만 요청 순서대로 반환한다")
+    void separatesUnconfirmedAppsInBatch() {
+        // given
+        mockRestServiceServer.expect(request -> {
+            String query = request.getURI().getQuery().substring("input_json=".length());
+            assertThat(objectMapper.readTree(query).get("ids")).isEqualTo(objectMapper.readTree("""
+                [{"appid":1},{"appid":2},{"appid":3},{"appid":4},{"appid":5},{"appid":6}]
+                """));
+        }).andRespond(withSuccess("""
+            {"response":{"store_items":[
+                {"item_type":0,"id":6,"success":15},
+                {"item_type":0,"id":5,"success":1,"is_free":true},
+                {"item_type":0,"id":4,"success":1,"purchase_options":[{"packageid":0}]},
+                {"item_type":0,"id":3,"success":1},{"item_type":0,"id":3,"success":1},
+                {"item_type":0,"id":1,"success":1},{"item_type":0,"id":99,"success":1}
+            ]}}
+            """, MediaType.APPLICATION_JSON));
+
+        // when
+        Map<Long, SteamPurchaseOptions> result = steamStoreClient.getPurchaseOptions(
+            List.of(1L, 2L, 3L, 4L, 5L, 6L));
+
+        // then
+        assertThat(result.keySet()).containsExactly(1L, 5L);
+        assertThat(result.get(5L).freeToPlay()).isTrue();
+        mockRestServiceServer.verify();
     }
 
     private void respondWithItems(String items) {

@@ -1,6 +1,14 @@
 package kr.co.pricelog.global.client.steam;
 
-import java.util.Locale;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
 import kr.co.pricelog.global.client.steam.constants.SteamApiConstants;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
 import kr.co.pricelog.global.client.steam.dto.SteamStoreItem;
@@ -14,37 +22,70 @@ import org.springframework.web.client.RestClientException;
 public class SteamStoreClient {
 
     private static final String PURCHASE_OPTIONS_QUERY = """
-        {"ids":[{"appid":%d}],"context":{"country_code":"KR","language":"koreana"},
+        {"ids":[%s],"context":{"country_code":"KR","language":"koreana"},
          "data_request":{"include_all_purchase_options":true}}
         """;
 
     private final RestClient restClient;
 
+    private final ObjectMapper objectMapper;
+
     /** 공개 상점 API에 연결한다. */
-    public SteamStoreClient(RestClient.Builder restClientBuilder) {
+    public SteamStoreClient(RestClient.Builder restClientBuilder, ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
         this.restClient = restClientBuilder.baseUrl(SteamApiConstants.BASE_URL).build();
     }
 
-    /** 본편의 Steam 앱 ID로 한국 상점의 전체 구매 옵션과 Steam이 지정한 기본 옵션을 읽는다. */
-    public SteamPurchaseOptions getPurchaseOptions(long steamAppId) {
-        if (steamAppId <= 0 || steamAppId > SteamApiConstants.MAX_APP_ID) {
-            throw new IllegalArgumentException("Steam 앱 ID가 범위를 벗어났습니다");
+    /**
+     * 한국 상점에 한 번 요청해 구매 옵션을 확인한 본편만 요청 순서대로 반환한다.
+     * 입력은 카탈로그의 game.steam_app_id에서 읽으며, DB 제약이 ID 범위와 고유성을 보장한다.
+     */
+    public Map<Long, SteamPurchaseOptions> getPurchaseOptions(List<Long> steamAppIds) {
+        if (steamAppIds.isEmpty()) {
+            return Map.of();
         }
-        String query = String.format(Locale.ROOT, PURCHASE_OPTIONS_QUERY, steamAppId);
+
+        String ids = steamAppIds.stream().map(id -> "{\"appid\":" + id + "}")
+            .collect(Collectors.joining(","));
         SteamStoreResponse result = restClient.get()
-            .uri("/IStoreBrowseService/GetItems/v1/?input_json={query}", query)
+            .uri("/IStoreBrowseService/GetItems/v1/?input_json={query}",
+                PURCHASE_OPTIONS_QUERY.formatted(ids))
             .retrieve()
             .body(SteamStoreResponse.class);
 
-        if (result == null || result.response() == null || result.response().items() == null
-            || result.response().items().size() != 1) {
-            throw new RestClientException("Steam 상점의 단건 조회 결과가 누락되거나 중복되었습니다");
+        if (result == null || result.response() == null || result.response().items() == null) {
+            throw new RestClientException("Steam 상점의 구매 옵션 조회 결과가 누락되었습니다");
         }
-        SteamStoreItem item = result.response().items().getFirst();
-        if (item == null || !item.isAppResultFor(steamAppId)) {
-            throw new RestClientException("Steam 상점이 요청한 앱의 구매 옵션을 확인하지 못했습니다");
+        Map<Long, List<JsonNode>> itemsById = result.response().items().stream()
+            .filter(item -> item != null && item.path("id").isIntegralNumber()
+                && item.path("id").canConvertToLong())
+            .collect(Collectors.groupingBy(item -> item.get("id").longValue()));
+
+        Map<Long, SteamPurchaseOptions> confirmed = new LinkedHashMap<>();
+        for (long steamAppId : steamAppIds) {
+            readPurchaseOptions(steamAppId, itemsById.get(steamAppId))
+                .ifPresent(options -> confirmed.put(steamAppId, options));
         }
-        return new SteamPurchaseOptions(item.options(), item.bestPurchaseOption(),
-            item.freeToPlay());
+        return Collections.unmodifiableMap(confirmed);
+    }
+
+    private Optional<SteamPurchaseOptions> readPurchaseOptions(long steamAppId,
+                                                               List<JsonNode> items) {
+        // TODO: 로깅 도입 시 제외된 앱 ID와 Steam 결과 코드·누락·중복·해석 실패 사유를 기록한다.
+        if (items == null || items.size() != 1) {
+            return Optional.empty();
+        }
+
+        try {
+            SteamStoreItem item = objectMapper.treeToValue(items.getFirst(), SteamStoreItem.class);
+            if (!item.isAppResultFor(steamAppId)) {
+                return Optional.empty();
+            }
+
+            return Optional.of(new SteamPurchaseOptions(item.options(), item.bestPurchaseOption(),
+                item.freeToPlay()));
+        } catch (JsonProcessingException | RestClientException ignored) {
+            return Optional.empty();
+        }
     }
 }
