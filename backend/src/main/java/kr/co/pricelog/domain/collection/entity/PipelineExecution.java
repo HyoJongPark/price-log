@@ -15,17 +15,20 @@ import kr.co.pricelog.domain.collection.dto.SteamPriceCollectionPlan;
 import kr.co.pricelog.domain.collection.enums.PipelineExecutionStatus;
 import kr.co.pricelog.domain.collection.enums.PipelineType;
 import kr.co.pricelog.global.entity.BaseEntity;
+import lombok.Getter;
 
 /** 파이프라인의 예정 시각 한 번에 대한 진행 상태. */
 @Entity
 public class PipelineExecution extends BaseEntity {
 
     @Id
+    @Getter
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Enumerated(EnumType.STRING)
-    private PipelineType pipeline;
+    @Column(name = "pipeline")
+    private PipelineType pipelineType;
 
     private Instant scheduledAt;
 
@@ -43,14 +46,19 @@ public class PipelineExecution extends BaseEntity {
 
     private Long[] failedIds;
 
+    /** 빈 배열도 변경 목록을 끝까지 읽어 가격 대상을 확정한 결과다. */
+    public boolean hasPriceTargets() {
+        return targetIds != null;
+    }
+
     /** 완료한 회차는 다시 요청하지 않고, 미완료 회차는 고정된 입력과 진행 위치를 복원한다. */
     public Optional<SteamPriceCollectionPlan> resumePriceCollection() {
         if (status == PipelineExecutionStatus.COMPLETED) {
             return Optional.empty();
         }
         resume();
-        return Optional.of(new SteamPriceCollectionPlan(List.of(targetIds), nextIndex,
-            List.of(failedIds)));
+        return Optional.of(new SteamPriceCollectionPlan(id, scheduledAt, List.of(targetIds),
+            nextIndex, List.of(failedIds)));
     }
 
     /** 이 회차의 모든 대상 처리를 마친 시각을 기록한다. */

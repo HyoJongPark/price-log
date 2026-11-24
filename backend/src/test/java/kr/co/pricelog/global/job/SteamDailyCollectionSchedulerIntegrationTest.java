@@ -57,6 +57,9 @@ class SteamDailyCollectionSchedulerIntegrationTest {
     private SteamStoreCollector steamStoreCollector;
 
     @Autowired
+    private SteamAppChangeCollector steamAppChangeCollector;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @Test
@@ -65,7 +68,7 @@ class SteamDailyCollectionSchedulerIntegrationTest {
         // given
         Instant firstSlot = Instant.parse("2026-11-22T18:10:00Z");
         SteamDailyCollectionScheduler scheduler = new SteamDailyCollectionScheduler(
-            steamCatalogCollector, steamStoreCollector, 1);
+            steamCatalogCollector, steamStoreCollector, steamAppChangeCollector, 1);
         SteamAppPage game = new SteamAppPage(List.of(new SteamApp(10, "본편")), OptionalLong.empty());
         SteamAppPage dlc = new SteamAppPage(List.of(new SteamApp(20, "DLC")), OptionalLong.empty());
         when(steamAppListClient.getPage(GAME, 0, 10000)).thenReturn(game);
@@ -84,7 +87,7 @@ class SteamDailyCollectionSchedulerIntegrationTest {
         Instant afternoon = nextSlot.plus(12, ChronoUnit.HOURS);
         scheduler.collectToday(afternoon);
         SteamDailyCollectionScheduler restarted = new SteamDailyCollectionScheduler(
-            steamCatalogCollector, steamStoreCollector, 1);
+            steamCatalogCollector, steamStoreCollector, steamAppChangeCollector, 1);
         restarted.collectToday(afternoon.plusSeconds(120));
 
         // then

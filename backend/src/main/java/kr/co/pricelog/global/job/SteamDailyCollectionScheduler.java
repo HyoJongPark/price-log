@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.time.temporal.ChronoUnit;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -21,6 +22,7 @@ public class SteamDailyCollectionScheduler {
 
     private final SteamCatalogCollector steamCatalogCollector;
     private final SteamStoreCollector steamStoreCollector;
+    private final SteamAppChangeCollector steamAppChangeCollector;
     private final int batchSize;
 
     // 단일 스케줄러 스레드에서 기동 호출과 정기 호출이 같은 회차에 연달아 들어오는 경우를 구분한다.
@@ -29,12 +31,14 @@ public class SteamDailyCollectionScheduler {
     /** 한 회차에서 순서대로 사용할 수집기와 상점 요청 크기를 받는다. */
     public SteamDailyCollectionScheduler(SteamCatalogCollector steamCatalogCollector,
                                         SteamStoreCollector steamStoreCollector,
+                                        SteamAppChangeCollector steamAppChangeCollector,
                                         @Value("${pricelog.collection.daily.batch-size}")
                                             int batchSize) {
         Assert.isTrue(batchSize > 0, "일별 수집 묶음 크기는 양수여야 합니다");
 
         this.steamCatalogCollector = steamCatalogCollector;
         this.steamStoreCollector = steamStoreCollector;
+        this.steamAppChangeCollector = steamAppChangeCollector;
         this.batchSize = batchSize;
     }
 
@@ -43,6 +47,19 @@ public class SteamDailyCollectionScheduler {
     @Scheduled(cron = "0 10 3,15 * * *", zone = SEOUL)
     public void collect() {
         collectToday(Instant.now());
+    }
+
+    /** 변경 목록은 전수 회차 사이에 여섯 시간마다 확인한다. */
+    @Scheduled(cron = "0 0 0,6,12,18 * * *", zone = SEOUL)
+    public void collectChanges() {
+        collectRecentChanges(Instant.now());
+    }
+
+    void collectRecentChanges(Instant now) {
+        ZonedDateTime seoulNow = now.atZone(ZoneId.of(SEOUL));
+        Instant slotAt = seoulNow.withHour(seoulNow.getHour() / 6 * 6)
+            .truncatedTo(ChronoUnit.HOURS).toInstant();
+        steamAppChangeCollector.collect(slotAt, batchSize);
     }
 
     void collectToday(Instant now) {

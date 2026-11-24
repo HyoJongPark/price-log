@@ -10,6 +10,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.global.client.steam.dto.SteamApp;
 import kr.co.pricelog.global.client.steam.dto.SteamAppPage;
@@ -63,6 +64,28 @@ class SteamAppListClientTest {
                 new SteamApp(70, "Second"));
             assertThat(last.apps()).containsExactly(new SteamApp(200, "Last"));
             assertThat(last.nextCursor()).isEmpty();
+            mockRestServiceServer.verify();
+        }
+
+        @Test
+        @DisplayName("변경 목록 요청은 조회 시작 시각의 Unix 초와 앱 커서를 함께 전달한다")
+        void requestsChangedPage() {
+            // given
+            Instant since = Instant.ofEpochSecond(1_795_000_000);
+            mockRestServiceServer.expect(request -> {
+                String query = request.getURI().getQuery().substring("input_json=".length());
+                JsonNode input = new ObjectMapper().readTree(query);
+                assertThat(input.required("if_modified_since").longValue())
+                    .isEqualTo(1_795_000_000);
+                assertThat(input.required("last_appid").longValue()).isEqualTo(35);
+            }).andExpect(header("x-webapi-key", "test-key"))
+                .andRespond(withSuccess("{\"response\":{}}", MediaType.APPLICATION_JSON));
+
+            // when
+            SteamAppPage page = steamAppListClient.getChangedPage(SteamAppType.GAME, 35, 10, since);
+
+            // then
+            assertThat(page.apps()).isEmpty();
             mockRestServiceServer.verify();
         }
 

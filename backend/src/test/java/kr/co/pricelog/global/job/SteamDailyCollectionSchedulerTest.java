@@ -2,6 +2,7 @@ package kr.co.pricelog.global.job;
 
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 
@@ -9,6 +10,7 @@ import java.time.Instant;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 
@@ -16,8 +18,10 @@ class SteamDailyCollectionSchedulerTest {
 
     private final SteamCatalogCollector steamCatalogCollector = mock(SteamCatalogCollector.class);
     private final SteamStoreCollector steamStoreCollector = mock(SteamStoreCollector.class);
+    private final SteamAppChangeCollector steamAppChangeCollector =
+        mock(SteamAppChangeCollector.class);
     private final SteamDailyCollectionScheduler scheduler = new SteamDailyCollectionScheduler(
-        steamCatalogCollector, steamStoreCollector, 2);
+        steamCatalogCollector, steamStoreCollector, steamAppChangeCollector, 2);
 
     @Test
     @DisplayName("03:10 직전에 서버가 기동하면 카탈로그와 가격을 조회하지 않는다")
@@ -74,5 +78,25 @@ class SteamDailyCollectionSchedulerTest {
         order.verify(steamCatalogCollector).collectAll(Instant.parse("2026-11-23T18:10:00Z"));
         order.verify(steamStoreCollector).collectAll(Instant.parse("2026-11-24T06:10:00Z"), 2);
         verifyNoMoreInteractions(steamCatalogCollector, steamStoreCollector);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "2026-11-23T15:00:11Z,2026-11-23T15:00:00Z",
+        "2026-11-23T21:01:00Z,2026-11-23T21:00:00Z",
+        "2026-11-24T03:00:00Z,2026-11-24T03:00:00Z",
+        "2026-11-24T14:59:59Z,2026-11-24T09:00:00Z"
+    })
+    @DisplayName("변경 수집이 늦게 호출돼도 한국 시각 00·06·12·18시 회차에 귀속한다")
+    void collectsLatestChangeSlot(Instant now, Instant expectedSlot) {
+        // given
+        int batchSize = 2;
+
+        // when
+        scheduler.collectRecentChanges(now);
+
+        // then
+        verify(steamAppChangeCollector).collect(expectedSlot, batchSize);
+        verifyNoInteractions(steamCatalogCollector, steamStoreCollector);
     }
 }

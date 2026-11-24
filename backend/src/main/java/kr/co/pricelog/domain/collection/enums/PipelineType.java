@@ -6,7 +6,8 @@ import kr.co.pricelog.domain.game.enums.SteamAppType;
 public enum PipelineType {
     STEAM_GAME_LIST,
     STEAM_DLC_LIST,
-    STEAM_PRICE;
+    STEAM_PRICE,
+    STEAM_CHANGED_APPS;
 
     /** 본편과 DLC는 각자의 커서로 전체 목록을 순회한다. */
     public static PipelineType forSteamList(SteamAppType type) {

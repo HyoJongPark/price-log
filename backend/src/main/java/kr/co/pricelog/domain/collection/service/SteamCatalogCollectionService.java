@@ -23,17 +23,17 @@ public class SteamCatalogCollectionService {
 
     /** 처음이면 0, 재실행이면 DB에 커밋된 커서, 완료했으면 빈 값을 반환한다. */
     public OptionalLong resumeCursor(SteamAppType type, Instant scheduledAt) {
-        PipelineType pipeline = PipelineType.forSteamList(type);
-        pipelineExecutionRepository.openIfAbsent(pipeline, scheduledAt);
-        PipelineExecution execution = pipelineExecutionRepository.findByPipelineAndScheduledAt(
-            pipeline, scheduledAt);
+        PipelineType pipelineType = PipelineType.forSteamList(type);
+        pipelineExecutionRepository.openIfAbsent(pipelineType, scheduledAt);
+        PipelineExecution execution = pipelineExecutionRepository.findByPipelineTypeAndScheduledAt(
+            pipelineType, scheduledAt);
         execution.resume();
         return execution.nextCursor();
     }
 
     /** 페이지 트랜잭션이 끝난 뒤 실패한 목록에만 결과를 기록한다. */
     public void markFailed(SteamAppType type, Instant scheduledAt) {
-        PipelineExecution execution = pipelineExecutionRepository.findByPipelineAndScheduledAt(
+        PipelineExecution execution = pipelineExecutionRepository.findByPipelineTypeAndScheduledAt(
             PipelineType.forSteamList(type), scheduledAt);
         execution.fail(Instant.now());
     }
@@ -42,7 +42,7 @@ public class SteamCatalogCollectionService {
     public OptionalLong savePageAndAdvanceCursor(SteamAppType type, Instant scheduledAt,
                                                  SteamAppPage page,
                                                  Instant observedAt) {
-        PipelineExecution execution = pipelineExecutionRepository.findByPipelineAndScheduledAt(
+        PipelineExecution execution = pipelineExecutionRepository.findByPipelineTypeAndScheduledAt(
             PipelineType.forSteamList(type), scheduledAt);
         OptionalLong lastAppId = OptionalLong.empty();
         if (!page.apps().isEmpty()) {

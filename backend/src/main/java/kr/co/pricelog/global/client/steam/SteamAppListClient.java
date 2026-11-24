@@ -1,5 +1,6 @@
 package kr.co.pricelog.global.client.steam;
 
+import java.time.Instant;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.OptionalLong;
@@ -20,7 +21,7 @@ public class SteamAppListClient {
 
     private static final int MAX_PAGE_SIZE = 50_000;
     private static final String PAGE_QUERY =
-        "{\"include_games\":%b,\"include_dlc\":%b,\"last_appid\":%d,\"max_results\":%d}";
+        "{\"include_games\":%b,\"include_dlc\":%b,\"last_appid\":%d,\"max_results\":%d%s}";
 
     private final RestClient restClient;
     private final SteamRequestRetry steamRequestRetry;
@@ -38,6 +39,18 @@ public class SteamAppListClient {
 
     /** 첫 페이지는 0, 다음 페이지는 직전 응답의 nextCursor로 요청한다. */
     public SteamAppPage getPage(SteamAppType type, long lastAppId, int pageSize) {
+        return requestPage(type, lastAppId, pageSize, "");
+    }
+
+    /** 시간 필터는 같은 목록의 모든 페이지에서 동일한 Unix 초를 사용한다. */
+    public SteamAppPage getChangedPage(SteamAppType type, long lastAppId, int pageSize,
+                                       Instant modifiedSince) {
+        return requestPage(type, lastAppId, pageSize,
+            ",\"if_modified_since\":" + modifiedSince.getEpochSecond());
+    }
+
+    private SteamAppPage requestPage(SteamAppType type, long lastAppId, int pageSize,
+                                     String timeFilter) {
         Objects.requireNonNull(type);
         if (type == SteamAppType.UNKNOWN) {
             throw new IllegalArgumentException("미확인 앱은 목록 수집 대상이 아닙니다");
@@ -48,7 +61,7 @@ public class SteamAppListClient {
         }
 
         String query = String.format(Locale.ROOT, PAGE_QUERY,
-            type == SteamAppType.GAME, type == SteamAppType.DLC, lastAppId, pageSize);
+            type == SteamAppType.GAME, type == SteamAppType.DLC, lastAppId, pageSize, timeFilter);
         SteamAppListResponse result = steamRequestRetry.execute(() -> restClient.get()
             .uri("/IStoreService/GetAppList/v1/?input_json={query}", query)
             .header("x-webapi-key", apiKey)
