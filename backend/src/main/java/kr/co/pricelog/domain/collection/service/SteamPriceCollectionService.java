@@ -33,8 +33,7 @@ public class SteamPriceCollectionService {
     /** 한 HTTP 응답으로 확인한 모든 게임에 같은 관측 시각을 부여한다. */
     public void saveOptions(Map<Long, SteamPurchaseOptions> confirmed, Instant slotAt,
                             Instant observedAt) {
-        confirmed.forEach((id, options) ->
-            gamePurchaseOptionService.applyPurchaseOptions(id, options, slotAt, observedAt));
+        gamePurchaseOptionService.applyPurchaseOptions(confirmed, slotAt, observedAt);
     }
 
     /** 옵션·가격·이력과 다음 위치·미해결 ID를 함께 확정한다. */

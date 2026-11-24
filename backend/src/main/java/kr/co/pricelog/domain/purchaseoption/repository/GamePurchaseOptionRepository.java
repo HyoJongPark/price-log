@@ -3,6 +3,7 @@ package kr.co.pricelog.domain.purchaseoption.repository;
 import java.util.List;
 import kr.co.pricelog.domain.game.entity.Game;
 import kr.co.pricelog.domain.purchaseoption.entity.GamePurchaseOption;
+import kr.co.pricelog.domain.purchaseoption.entity.PurchaseOption;
 import org.springframework.data.repository.Repository;
 
 /** 게임별 활성 구매 옵션을 조회하고 연결 변경을 저장한다. */
@@ -10,6 +11,9 @@ public interface GamePurchaseOptionRepository extends Repository<GamePurchaseOpt
 
     /** 해당 게임에서 마지막으로 확인한 활성 연결을 읽는다. */
     List<GamePurchaseOption> findByGame(Game game);
+
+    /** 해당 판매 구간을 아직 제공 중인 모든 게임의 연결을 찾는다. */
+    List<GamePurchaseOption> findByPurchaseOption(PurchaseOption purchaseOption);
 
     /** 새 구매 옵션 연결을 저장한다. */
     GamePurchaseOption save(GamePurchaseOption link);

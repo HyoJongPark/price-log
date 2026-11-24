@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import kr.co.pricelog.domain.game.service.GameCatalogService;
@@ -238,8 +239,9 @@ class SteamStoreCollectorIntegrationTest {
             // then
             assertThat(activeOptions(301)).isEmpty();
             assertThat(activeOptions(302)).containsExactly("PACKAGE:31:true");
-            assertThat(jdbcTemplate.queryForList("SELECT deleted_at IS NULL FROM purchase_option",
-                Boolean.class)).containsExactly(true);
+            assertThat(jdbcTemplate.queryForList("""
+                SELECT deleted_at IS NULL AND sale_ended_at IS NULL FROM purchase_option
+                """, Boolean.class)).containsExactly(true);
             Long closedLinkId = jdbcTemplate.queryForObject(
                 "SELECT id FROM game_purchase_option WHERE deleted_at IS NOT NULL", Long.class);
             assertThat(entityManager.find(GamePurchaseOption.class, closedLinkId)).isNull();
@@ -251,8 +253,8 @@ class SteamStoreCollectorIntegrationTest {
             // given
             jdbcTemplate.update("""
                 INSERT INTO purchase_option
-                    (type, steam_id, name, created_at, updated_at, deleted_at)
-                VALUES ('PACKAGE', 31, '종료된 구간', now(), now(), now())
+                    (type, steam_id, name, created_at, updated_at, sale_ended_at)
+                VALUES ('PACKAGE', 31, '종료된 구간', '2025-11-01Z', '2025-12-01Z', '2025-12-01Z')
                 """);
             when(steamStoreClient.getPurchaseOptions(List.of(301L)))
                 .thenReturn(Map.of(301L,
@@ -268,23 +270,28 @@ class SteamStoreCollectorIntegrationTest {
         }
 
         @Test
-        @DisplayName("삭제된 게임의 상점 응답은 카탈로그나 구매 옵션에 반영하지 않는다")
-        void rejectsDeletedGame() {
+        @DisplayName("삭제된 게임이 섞이면 같은 배치의 다른 게임도 반영하지 않는다")
+        void rollsBackBatchContainingDeletedGame() {
             // given
-            jdbcTemplate.update("UPDATE game SET deleted_at = now() WHERE steam_app_id = 301");
-            when(steamStoreClient.getPurchaseOptions(List.of(301L)))
-                .thenReturn(Map.of(301L,
-                    new SteamPurchaseOptions(List.of(edition), edition, false)));
+            jdbcTemplate.update("UPDATE game SET deleted_at = now() WHERE steam_app_id = 302");
+            List<Long> appIds = List.of(301L, 302L);
+            Map<Long, SteamPurchaseOptions> confirmed = new LinkedHashMap<>();
+            SteamPurchaseOptions options = new SteamPurchaseOptions(
+                List.of(edition), edition, false);
+            appIds.forEach(appId -> confirmed.put(appId, options));
+            when(steamStoreClient.getPurchaseOptions(appIds)).thenReturn(confirmed);
 
             // when
             Throwable failure = catchThrowable(
-                () -> steamStoreCollector.collectPurchaseOptions(List.of(301L), SLOT));
+                () -> steamStoreCollector.collectPurchaseOptions(appIds, SLOT));
 
             // then
             assertThat(failure).isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("활성 카탈로그에 없는 Steam 앱");
+                .hasMessage("활성 카탈로그에 없는 Steam 앱: 302");
             assertThat(activeOptions(301)).isEmpty();
             assertThat(freeFlag(301)).isNull();
+            assertThat(activeOptions(302)).isEmpty();
+            assertThat(freeFlag(302)).isNull();
         }
 
         @Test
@@ -311,7 +318,8 @@ class SteamStoreCollectorIntegrationTest {
                 SELECT concat(o.type, ':', o.steam_id, ':', l.is_best_option::text)
                 FROM game_purchase_option l JOIN game g ON g.id = l.game_id
                     JOIN purchase_option o ON o.id = l.purchase_option_id
-                WHERE g.steam_app_id = ? AND l.deleted_at IS NULL AND o.deleted_at IS NULL
+                WHERE g.steam_app_id = ? AND l.deleted_at IS NULL
+                  AND o.deleted_at IS NULL AND o.sale_ended_at IS NULL
                 ORDER BY o.type, o.steam_id
                 """, String.class, steamAppId);
         }

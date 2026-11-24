@@ -8,6 +8,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import java.time.Instant;
+import java.util.Objects;
 import kr.co.pricelog.global.client.steam.dto.SteamPrice;
 import kr.co.pricelog.global.client.steam.enums.SteamPurchaseOptionType;
 import kr.co.pricelog.global.entity.BaseEntity;
@@ -43,11 +44,18 @@ public class PurchaseOption extends BaseEntity {
 
     private Instant priceObservedAt;
 
+    private Instant saleEndedAt;
+
     /** Steam에서 확인한 판매 상품의 새 구간을 연다. */
     public PurchaseOption(SteamPurchaseOptionType type, long steamId, String name) {
         this.type = type;
         this.steamId = steamId;
         this.name = name;
+    }
+
+    /** 이 판매 구간의 한국 판매 종료를 확인한 시각을 기록한다. */
+    public void endSale(Instant endedAt) {
+        saleEndedAt = Objects.requireNonNull(endedAt);
     }
 
     /** 한국 상점의 최신 구매 옵션 표시명을 반영한다. */

@@ -1,7 +1,8 @@
 package kr.co.pricelog.domain.game.repository;
 
 import java.time.Instant;
-import java.util.Optional;
+import java.util.Collection;
+import java.util.List;
 import kr.co.pricelog.domain.game.entity.Game;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
 import org.springframework.data.jpa.repository.Modifying;
@@ -12,8 +13,8 @@ import org.springframework.data.repository.query.Param;
 /** Steam 목록에서 확인한 항목을 한 페이지씩 저장한다. */
 public interface GameRepository extends Repository<Game, Long> {
 
-    /** 상점 응답을 반영할 활성 카탈로그 항목을 조회한다. */
-    Optional<Game> findBySteamAppId(long steamAppId);
+    /** 한 배치의 상점 응답에 대응하는 활성 카탈로그 항목을 조회한다. */
+    List<Game> findAllBySteamAppIdIn(Collection<Long> steamAppIds);
 
     /** 같은 앱이 겹치면 목록에서 얻은 필드만 갱신한다. */
     @Modifying

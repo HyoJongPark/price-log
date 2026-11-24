@@ -10,6 +10,7 @@ import jakarta.persistence.Id;
 import java.time.Instant;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.global.entity.BaseEntity;
+import lombok.Getter;
 import org.hibernate.annotations.SQLRestriction;
 
 /** Steam 앱 번호로 식별하는 카탈로그 항목. */
@@ -21,6 +22,7 @@ public class Game extends BaseEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Getter
     @Column(nullable = false, unique = true)
     private Long steamAppId;
 

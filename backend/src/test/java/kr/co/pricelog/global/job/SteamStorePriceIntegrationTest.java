@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import kr.co.pricelog.domain.collection.service.SteamPriceCollectionService;
 import kr.co.pricelog.domain.game.service.GameCatalogService;
+import kr.co.pricelog.domain.purchaseoption.service.GamePurchaseOptionService;
 import kr.co.pricelog.global.client.steam.SteamRequestRetry;
 import kr.co.pricelog.global.client.steam.SteamStoreClient;
 import kr.co.pricelog.global.client.steam.dto.SteamApp;
@@ -23,6 +24,8 @@ import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -40,6 +43,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class SteamStorePriceIntegrationTest {
 
     private static final Instant SLOT = Instant.parse("2026-01-01T00:00:00Z");
+    private static final Instant SALE_END = SLOT.plus(1, ChronoUnit.DAYS);
+    private static final Instant RESALE = SALE_END.plus(1, ChronoUnit.DAYS);
     private static final String DISCOUNT = """
         "final_price_in_cents":"100000","formatted_final_price":"₩ 1,000",
         "original_price_in_cents":"200000","formatted_original_price":"₩ 2,000",
@@ -59,6 +64,9 @@ class SteamStorePriceIntegrationTest {
 
     @Autowired
     private SteamPriceCollectionService steamPriceCollectionService;
+
+    @Autowired
+    private GamePurchaseOptionService gamePurchaseOptionService;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -207,7 +215,7 @@ class SteamStorePriceIntegrationTest {
             SELECT g.steam_app_id, o.type, o.steam_id, l.is_best_option, o.current_price
             FROM game_purchase_option l JOIN game g ON g.id = l.game_id
             JOIN purchase_option o ON o.id = l.purchase_option_id
-            WHERE l.deleted_at IS NULL AND o.deleted_at IS NULL
+            WHERE l.deleted_at IS NULL AND o.deleted_at IS NULL AND o.sale_ended_at IS NULL
             ORDER BY g.steam_app_id, o.steam_id, o.type
             """)).extracting(row -> row.get("steam_app_id"), row -> row.get("type"),
                 row -> row.get("steam_id"), row -> row.get("is_best_option"),
@@ -223,16 +231,202 @@ class SteamStorePriceIntegrationTest {
         mockRestServiceServer.verify();
     }
 
+    @Test
+    @DisplayName("공유 상품을 종료하면 모든 게임 연결이 닫히고 중복 종료 요청은 재판매에 영향을 주지 않는다")
+    void endsSharedSaleOnce() {
+        respondWithItems(item(301, DISCOUNT) + "," + item(302, DISCOUNT));
+        respond(301, ZERO);
+        steamStoreCollector.collectPurchaseOptions(List.of(301L, 302L), SLOT);
+
+        long originalId = activePackageId();
+        gamePurchaseOptionService.endSale(originalId, SALE_END);
+        assertThat(jdbcTemplate.queryForList("""
+            SELECT deleted_at FROM game_purchase_option WHERE purchase_option_id = ?
+            """, Timestamp.class, originalId))
+            .containsExactly(Timestamp.from(SALE_END), Timestamp.from(SALE_END));
+
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), RESALE);
+        long resaleId = activePackageId();
+        gamePurchaseOptionService.endSale(originalId, RESALE);
+
+        assertThat(resaleId).isNotEqualTo(originalId);
+        assertThat(activePackageId()).isEqualTo(resaleId);
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT sale_ended_at FROM purchase_option WHERE id = ?", Timestamp.class, originalId))
+            .isEqualTo(Timestamp.from(SALE_END));
+        mockRestServiceServer.verify();
+    }
+
+    @Test
+    @DisplayName("종료 시각과 같은 회차에는 판매 구간을 다시 열지 않는다")
+    void staysClosedAtSaleEnd() {
+        respond(301, DISCOUNT);
+        respond(301, DISCOUNT);
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), SLOT);
+        gamePurchaseOptionService.endSale(activePackageId(), SALE_END);
+
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), SALE_END);
+
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT count(*) FROM purchase_option
+            WHERE type = 'PACKAGE' AND deleted_at IS NULL AND sale_ended_at IS NULL
+            """, Integer.class)).isZero();
+        mockRestServiceServer.verify();
+    }
+
+    @Test
+    @DisplayName("과거 회차의 가격은 재판매 패키지를 건너뛰고 계속 판매 중인 번들 이력에 남긴다")
+    void recordsOnlyUnchangedPricesOnReplay() {
+        respondWithItems(item(301, DISCOUNT, 77, ZERO));
+        respondWithItems(item(301, ZERO, 77, ZERO));
+        respondWithItems(item(301, DISCOUNT, 77, DISCOUNT) + "," + """
+            {"item_type":0,"success":1,"id":302,"purchase_options":[{"bundleid":31,%s}]}
+            """.formatted(DISCOUNT));
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), SLOT);
+        gamePurchaseOptionService.endSale(activePackageId(), SALE_END);
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), RESALE);
+
+        Instant lateSlot = SALE_END.minusSeconds(1);
+        steamStoreCollector.collectPurchaseOptions(List.of(301L, 302L), lateSlot);
+
+        assertThat(jdbcTemplate.queryForList("""
+            SELECT o.sale_ended_at, o.current_price, h.current_price AS historical, h.slot_at
+            FROM purchase_option o JOIN price_history h ON h.purchase_option_id = o.id
+            WHERE o.type = 'PACKAGE' AND o.deleted_at IS NULL ORDER BY o.id, h.slot_at
+            """)).extracting(row -> row.get("sale_ended_at"), row -> row.get("current_price"),
+                row -> row.get("historical"), row -> row.get("slot_at"))
+            .containsExactly(tuple(Timestamp.from(SALE_END), 1000L, 1000L, Timestamp.from(SLOT)),
+                tuple(null, 0L, 0L, Timestamp.from(RESALE)));
+        assertThat(jdbcTemplate.queryForList("""
+            SELECT g.steam_app_id, o.steam_id, o.current_price, h.current_price AS historical
+            FROM purchase_option o JOIN price_history h ON h.purchase_option_id = o.id
+            JOIN game_purchase_option l ON l.purchase_option_id = o.id AND l.deleted_at IS NULL
+            JOIN game g ON g.id = l.game_id
+            WHERE o.type = 'BUNDLE' AND h.slot_at = ? ORDER BY o.steam_id
+            """, Timestamp.from(lateSlot)))
+            .extracting(row -> row.get("steam_app_id"), row -> row.get("steam_id"),
+                row -> row.get("current_price"), row -> row.get("historical"))
+            .containsExactly(tuple(302L, 31L, 1000L, 1000L), tuple(301L, 77L, 0L, 1000L));
+        mockRestServiceServer.verify();
+    }
+
+    @Test
+    @DisplayName("이전에 연결되지 않은 게임의 과거 응답에 종료된 패키지가 있어도 새로 연결하지 않는다")
+    void skipsEndedPackageInUnlinkedGameResponse() {
+        respond(301, DISCOUNT);
+        respond(301, ZERO);
+        respond(302, DISCOUNT);
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), SLOT);
+        gamePurchaseOptionService.endSale(activePackageId(), SALE_END);
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), RESALE);
+
+        steamStoreCollector.collectPurchaseOptions(List.of(302L), SLOT);
+
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT count(*) FROM game_purchase_option l JOIN game g ON g.id = l.game_id
+            WHERE g.steam_app_id = 302 AND l.deleted_at IS NULL
+            """, Integer.class)).isZero();
+        mockRestServiceServer.verify();
+    }
+
+    @Test
+    @DisplayName("회차 전에 게임과의 연결이 끝난 상품은 그 게임의 새 구매 옵션을 막지 않는다")
+    void ignoresLinksClosedBeforeSlot() {
+        respond(301, DISCOUNT);
+        respondWithItems("""
+            {"item_type":0,"success":1,"id":301,"purchase_options":[{"packageid":72,%s}]}
+            """.formatted(DISCOUNT));
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), SLOT);
+
+        Instant nextSlot = SLOT.plus(1, ChronoUnit.DAYS);
+        jdbcTemplate.update("""
+            UPDATE game_purchase_option SET deleted_at = ?
+            WHERE purchase_option_id IN (SELECT id FROM purchase_option WHERE type = 'PACKAGE')
+            """, Timestamp.from(nextSlot.minusSeconds(1)));
+        jdbcTemplate.update("UPDATE purchase_option SET sale_ended_at = ? WHERE type = 'PACKAGE'",
+            Timestamp.from(nextSlot.plusSeconds(1)));
+
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), nextSlot);
+
+        assertThat(jdbcTemplate.queryForList("""
+            SELECT o.steam_id FROM game_purchase_option l
+            JOIN purchase_option o ON o.id = l.purchase_option_id WHERE l.deleted_at IS NULL
+            """, Long.class)).containsExactly(72L);
+        mockRestServiceServer.verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("소프트 삭제한 상품은 판매 종료로 판정하지 않고 같은 Steam 번호의 정상 응답을 저장한다")
+    void excludesSoftDeletionFromSaleEndDetection(boolean hadSaleEnd) {
+        // given
+        Timestamp endedAt = hadSaleEnd ? Timestamp.from(SALE_END) : null;
+        jdbcTemplate.update("""
+            INSERT INTO purchase_option (type, steam_id, created_at, updated_at, deleted_at,
+                                         sale_ended_at)
+            VALUES ('PACKAGE', 31, ?, ?, ?, ?)
+            """, Timestamp.from(SLOT), Timestamp.from(RESALE), Timestamp.from(RESALE), endedAt);
+        respond(301, DISCOUNT);
+
+        // when
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), SLOT);
+
+        // then
+        assertThat(jdbcTemplate.queryForList("""
+            SELECT current_price FROM price_history WHERE purchase_option_id = ?
+            """, Long.class, activePackageId())).containsExactly(1000L);
+        mockRestServiceServer.verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {301, 302})
+    @DisplayName("재판매 후 기존 게임과 새 게임 모두 과거 빈 응답으로 대표 연결을 잃지 않는다")
+    void keepsResaleLinkOnEmptyReplay(int resaleAppId) {
+        respond(301, DISCOUNT);
+        respond(resaleAppId, ZERO);
+        respondWithItems("""
+            {"item_type":0,"success":1,"id":%d,"purchase_options":[]}
+            """.formatted(resaleAppId));
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), SLOT);
+        gamePurchaseOptionService.endSale(activePackageId(), SALE_END);
+        steamStoreCollector.collectPurchaseOptions(List.of((long) resaleAppId), RESALE);
+
+        String bestLink = """
+            SELECT l.id FROM game_purchase_option l
+            JOIN game g ON g.id = l.game_id JOIN purchase_option o ON o.id = l.purchase_option_id
+            WHERE g.steam_app_id = ? AND o.type = 'PACKAGE' AND o.steam_id = 31
+              AND o.deleted_at IS NULL AND o.sale_ended_at IS NULL
+              AND l.deleted_at IS NULL AND l.is_best_option
+            """;
+        Long linkId = jdbcTemplate.queryForObject(bestLink, Long.class, resaleAppId);
+        steamStoreCollector.collectPurchaseOptions(List.of((long) resaleAppId), SLOT);
+
+        assertThat(jdbcTemplate.queryForList(bestLink, Long.class, resaleAppId))
+            .containsExactly(linkId);
+        mockRestServiceServer.verify();
+    }
+
+    private long activePackageId() {
+        return jdbcTemplate.queryForObject("""
+            SELECT id FROM purchase_option WHERE type = 'PACKAGE' AND steam_id = 31
+            AND deleted_at IS NULL AND sale_ended_at IS NULL
+            """, Long.class);
+    }
+
     private void respond(int appId, String packageFields) {
         respondWithItems(item(appId, packageFields));
     }
 
     private String item(int appId, String packageFields) {
+        return item(appId, packageFields, 31, ZERO);
+    }
+
+    private String item(int appId, String packageFields, int bundleId, String bundleFields) {
         return """
             {"item_type":0,"success":1,"id":%d,
             "best_purchase_option":{"packageid":31},"purchase_options":[
-            {"packageid":31,%s},{"bundleid":31,%s}]}
-            """.formatted(appId, packageFields, ZERO);
+            {"packageid":31,%s},{"bundleid":%d,%s}]}
+            """.formatted(appId, packageFields, bundleId, bundleFields);
     }
 
     private void respondWithItems(String items) {
