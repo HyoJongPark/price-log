@@ -1,6 +1,8 @@
 package kr.co.pricelog.domain.collection.repository;
 
 import java.time.Instant;
+import java.util.Optional;
+import kr.co.pricelog.domain.collection.dto.ExecutionTime;
 import kr.co.pricelog.domain.collection.entity.PipelineExecution;
 import kr.co.pricelog.domain.collection.enums.PipelineExecutionStatus;
 import kr.co.pricelog.domain.collection.enums.PipelineType;
@@ -13,11 +15,11 @@ public interface PipelineExecutionRepository extends Repository<PipelineExecutio
 
     /** 최초 실행만 시작 행을 만들고 재실행은 기존 진행 위치를 보존한다. */
     @Modifying
-    @Query(value = """
-        INSERT INTO pipeline_execution (pipeline, scheduled_at, created_at, updated_at)
-        VALUES (:#{#pipelineType.name()}, :scheduledAt, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        ON CONFLICT (pipeline, scheduled_at) DO NOTHING
-        """, nativeQuery = true)
+    @Query("""
+        INSERT INTO PipelineExecution (pipelineType, scheduledAt, createdAt, updatedAt)
+        VALUES (:pipelineType, :scheduledAt, instant, instant)
+        ON CONFLICT (pipelineType, scheduledAt) DO NOTHING
+        """)
     void openIfAbsent(PipelineType pipelineType, Instant scheduledAt);
 
     /** 최초 실행에만 활성 본편 ID를 확정한다. 재개 시 카탈로그를 다시 읽지 않는다. */
@@ -34,34 +36,31 @@ public interface PipelineExecutionRepository extends Repository<PipelineExecutio
         """, nativeQuery = true)
     void openPriceCollection(Instant slotAt);
 
-    /** 첫 실패 이후에도 최초 조회 범위를 보존하고, 완주한 목록의 시작 시각을 기준으로 잇는다. */
-    @Query(value = """
-        SELECT coalesce(max(scheduled_at) FILTER (WHERE target_ids IS NOT NULL),
-                        min(scheduled_at) - interval '6 hours')
-        FROM pipeline_execution
-        WHERE pipeline = 'STEAM_CHANGED_APPS' AND scheduled_at <= :slotAt
-        """, nativeQuery = true)
-    Instant changeWindowStart(Instant slotAt);
+    /** 현재 회차보다 앞서 가격 대상을 확정한 마지막 회차. 빈 목록도 확정으로 센다. */
+    Optional<ExecutionTime>
+        findFirstByPipelineTypeAndTargetIdsNotNullAndScheduledAtBeforeOrderByScheduledAtDesc(
+            PipelineType pipelineType, Instant slotAt);
 
-    /** 직전 목록의 미확인·미처리 ID와 새로 읽은 본편을 합쳐 이번 회차의 입력을 고정한다. */
+    /** 현재 회차를 연 뒤 조회하므로 최초 시도 시각은 항상 존재한다. */
+    ExecutionTime findFirstByPipelineTypeOrderByScheduledAtAsc(PipelineType pipelineType);
+
+    /** 직전 목록의 실패·미처리 ID를 DB 안에서 합쳐 활성 본편만 앱 번호순으로 확정한다. */
     @Modifying
     @Query(value = """
         WITH previous AS (
-            SELECT target_ids, next_index, failed_ids FROM pipeline_execution
+            SELECT failed_ids || target_ids[next_index + 1:] AS pending_ids
+            FROM pipeline_execution
             WHERE pipeline = 'STEAM_CHANGED_APPS' AND scheduled_at < :slotAt
-              AND target_ids IS NOT NULL ORDER BY scheduled_at DESC LIMIT 1
-        ), candidates AS (
-            SELECT unnest(CAST(:gameIds AS bigint[])) AS app_id
-            UNION ALL
-            SELECT unnest(failed_ids) FROM previous
-            UNION ALL
-            SELECT pending.app_id FROM previous,
-                unnest(target_ids) WITH ORDINALITY pending(app_id, position)
-            WHERE pending.position > previous.next_index
+                AND target_ids IS NOT NULL
+            ORDER BY scheduled_at DESC LIMIT 1
         )
         UPDATE pipeline_execution SET target_ids = ARRAY(
             SELECT steam_app_id FROM game WHERE app_type = 'GAME' AND deleted_at IS NULL
-            AND steam_app_id IN (SELECT app_id FROM candidates) ORDER BY steam_app_id
+                AND steam_app_id IN (
+                    SELECT unnest(CAST(:gameIds AS bigint[]))
+                    UNION ALL SELECT unnest(pending_ids) FROM previous
+                )
+            ORDER BY steam_app_id
         ), updated_at = CURRENT_TIMESTAMP
         WHERE id = :executionId AND target_ids IS NULL
         """, nativeQuery = true)
@@ -69,11 +68,10 @@ public interface PipelineExecutionRepository extends Repository<PipelineExecutio
 
     /** 각 묶음에서는 고정된 전체 대상 배열을 다시 쓰지 않고 진행 위치만 갱신한다. */
     @Modifying
-    @Query(value = """
-        UPDATE pipeline_execution
-        SET next_index = :nextIndex, failed_ids = :failedIds, updated_at = CURRENT_TIMESTAMP
-        WHERE id = :executionId
-        """, nativeQuery = true)
+    @Query("""
+        UPDATE PipelineExecution e SET e.nextIndex = :nextIndex, e.failedIds = :failedIds,
+            e.updatedAt = instant WHERE e.id = :executionId
+        """)
     void updatePriceProgress(long executionId, int nextIndex, Long[] failedIds);
 
     /** 전체 대상 배열을 로드하지 않고 실행 중인 가격 회차의 종료 상태와 시각만 기록한다. */

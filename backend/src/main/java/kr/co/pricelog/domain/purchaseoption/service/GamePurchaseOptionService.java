@@ -1,5 +1,8 @@
 package kr.co.pricelog.domain.purchaseoption.service;
 
+import static kr.co.pricelog.global.client.steam.enums.SteamPurchaseOptionType.BUNDLE;
+import static kr.co.pricelog.global.client.steam.enums.SteamPurchaseOptionType.PACKAGE;
+
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -31,6 +34,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 @RequiredArgsConstructor
 public class GamePurchaseOptionService {
+
+    // IN 조건은 ID마다 바인딩한다. 큰 입력도 PostgreSQL의 문장당 파라미터 한도 안에서 읽는다.
+    private static final int OPTIONS_PER_QUERY = 30_000;
 
     private final GameRepository gameRepository;
     private final PurchaseOptionRepository purchaseOptionRepository;
@@ -138,17 +144,23 @@ public class GamePurchaseOptionService {
             .distinct()
             .toList();
         Map<PurchaseOptionKey, PurchaseOption> activeOptions = new HashMap<>();
-        if (keys.isEmpty()) {
-            return activeOptions;
-        }
 
-        // SQL에서 두 배열의 같은 위치를 한 상품으로 묶으므로 둘 다 같은 키 목록에서 꺼낸다.
-        String[] types = keys.stream().map(key -> key.type().name()).toArray(String[]::new);
-        Long[] steamIds = keys.stream().map(PurchaseOptionKey::steamId).toArray(Long[]::new);
-        for (PurchaseOption option : purchaseOptionRepository.findActiveByKeys(types, steamIds)) {
-            activeOptions.put(new PurchaseOptionKey(option.getType(), option.getSteamId()), option);
+        for (int start = 0; start < keys.size(); start += OPTIONS_PER_QUERY) {
+            List<PurchaseOptionKey> batch = keys.subList(start,
+                Math.min(start + OPTIONS_PER_QUERY, keys.size()));
+            List<PurchaseOption> options = purchaseOptionRepository.findActiveOptions(
+                steamIds(batch, PACKAGE), steamIds(batch, BUNDLE));
+            for (PurchaseOption option : options) {
+                activeOptions.put(new PurchaseOptionKey(option.getType(), option.getSteamId()),
+                    option);
+            }
         }
         return activeOptions;
+    }
+
+    private List<Long> steamIds(List<PurchaseOptionKey> keys, SteamPurchaseOptionType type) {
+        return keys.stream().filter(key -> key.type() == type)
+            .map(PurchaseOptionKey::steamId).toList();
     }
 
     private ClosedSales loadClosedSales(Instant slotAt) {

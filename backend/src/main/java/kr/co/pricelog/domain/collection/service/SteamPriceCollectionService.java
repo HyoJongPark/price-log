@@ -5,11 +5,13 @@ import static kr.co.pricelog.domain.collection.enums.PipelineExecutionStatus.FAI
 import static kr.co.pricelog.domain.collection.enums.PipelineType.STEAM_CHANGED_APPS;
 import static kr.co.pricelog.domain.collection.enums.PipelineType.STEAM_PRICE;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import kr.co.pricelog.domain.collection.dto.ExecutionTime;
 import kr.co.pricelog.domain.collection.dto.SteamChangeListPlan;
 import kr.co.pricelog.domain.collection.dto.SteamPriceCollectionPlan;
 import kr.co.pricelog.domain.collection.entity.PipelineExecution;
@@ -26,6 +28,8 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class SteamPriceCollectionService {
 
+    private static final Duration FIRST_CHANGE_WINDOW = Duration.ofHours(6);
+
     private final PipelineExecutionRepository pipelineExecutionRepository;
     private final GamePurchaseOptionService gamePurchaseOptionService;
 
@@ -39,8 +43,14 @@ public class SteamPriceCollectionService {
         }
 
         execution.resume();
-        Instant since = pipelineExecutionRepository.changeWindowStart(slotAt).minusSeconds(1);
-        return new SteamChangeListPlan(execution.getId(), Optional.of(since));
+        Instant start = pipelineExecutionRepository
+            .findFirstByPipelineTypeAndTargetIdsNotNullAndScheduledAtBeforeOrderByScheduledAtDesc(
+                STEAM_CHANGED_APPS, slotAt)
+            .map(ExecutionTime::scheduledAt)
+            .orElseGet(() -> pipelineExecutionRepository
+                .findFirstByPipelineTypeOrderByScheduledAtAsc(STEAM_CHANGED_APPS)
+                .scheduledAt().minus(FIRST_CHANGE_WINDOW));
+        return new SteamChangeListPlan(execution.getId(), Optional.of(start.minusSeconds(1)));
     }
 
     /** 모든 변경 목록 페이지가 성공한 뒤에만 상점 조회 대상을 확정한다. */

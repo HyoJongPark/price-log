@@ -190,20 +190,23 @@ class SteamAppChangeCollectorIntegrationTest {
         // given
         final Instant six = MIDNIGHT.plus(6, ChronoUnit.HOURS);
         when(steamAppListClient.getChangedPage(eq(GAME), eq(0L), eq(10000), any()))
-            .thenReturn(page(10, 20, 30), EMPTY);
+            .thenReturn(page(10, 20, 30, 35, 40, 50), page(15, 30));
         when(steamAppListClient.getChangedPage(eq(DLC), eq(0L), eq(10000), any()))
-            .thenReturn(EMPTY);
+            .thenReturn(EMPTY, page(40));
         when(steamStoreClient.getPurchaseOptions(List.of(10L)))
             .thenReturn(Map.of(10L, option(10L)));
         when(steamStoreClient.getPurchaseOptions(List.of(20L))).thenReturn(Map.of());
         when(steamStoreClient.getPurchaseOptions(List.of(30L)))
             .thenThrow(new RestClientException("상점 중단"));
-        when(steamStoreClient.getPurchaseOptions(List.of(20L, 30L)))
-            .thenReturn(Map.of(20L, option(20L), 30L, option(30L)));
+        when(steamStoreClient.getPurchaseOptions(List.of(15L, 20L, 30L, 35L)))
+            .thenReturn(Map.of(15L, option(15L), 20L, option(20L), 30L, option(30L),
+                35L, option(35L)));
 
         // when
         final Throwable failure =
             catchThrowable(() -> steamAppChangeCollector.collect(MIDNIGHT, 1));
+        jdbcTemplate.update("UPDATE game SET deleted_at = ? WHERE steam_app_id = 50",
+            Timestamp.from(six));
         steamAppChangeCollector.collect(six, 260);
 
         // then
@@ -211,10 +214,14 @@ class SteamAppChangeCollectorIntegrationTest {
         assertThat(status(MIDNIGHT)).isEqualTo("FAILED");
         assertThat(status(six)).isEqualTo("COMPLETED");
         verify(steamAppListClient).getChangedPage(GAME, 0, 10000, MIDNIGHT.minusSeconds(1));
-        verify(steamStoreClient).getPurchaseOptions(List.of(20L, 30L));
+        verify(steamStoreClient).getPurchaseOptions(List.of(15L, 20L, 30L, 35L));
+        verify(steamStoreClient).getPurchaseOptions(List.of(10L));
+        verify(steamStoreClient).getPurchaseOptions(List.of(20L));
+        verify(steamStoreClient).getPurchaseOptions(List.of(30L));
+        verifyNoMoreInteractions(steamStoreClient);
         assertThat(jdbcTemplate.queryForList("SELECT slot_at FROM price_history ORDER BY slot_at",
             Timestamp.class)).containsExactly(Timestamp.from(MIDNIGHT), Timestamp.from(six),
-            Timestamp.from(six));
+            Timestamp.from(six), Timestamp.from(six), Timestamp.from(six));
     }
 
     @Test

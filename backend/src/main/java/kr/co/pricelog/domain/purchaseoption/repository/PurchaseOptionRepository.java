@@ -11,14 +11,13 @@ import org.springframework.data.repository.Repository;
 /** 패키지·번들의 종류와 Steam 번호로 한국 판매 상품을 식별한다. */
 public interface PurchaseOptionRepository extends Repository<PurchaseOption, Long> {
 
-    /** 두 배열의 같은 위치를 하나의 상품 키로 묶어 현재 판매 구간을 조회한다. */
-    @Query(value = """
-        SELECT o.* FROM purchase_option o
-        JOIN unnest(CAST(:types AS text[]), CAST(:steamIds AS bigint[])) AS k(type, steam_id)
-          ON o.type = k.type AND o.steam_id = k.steam_id
-        WHERE o.deleted_at IS NULL AND o.sale_ended_at IS NULL
-        """, nativeQuery = true)
-    List<PurchaseOption> findActiveByKeys(String[] types, Long[] steamIds);
+    /** 판매 중인 패키지와 번들을 각각의 Steam 번호 목록으로 한 번에 조회한다. */
+    @Query("""
+        SELECT o FROM PurchaseOption o WHERE o.saleEndedAt IS NULL AND (
+            (o.type = PACKAGE AND o.steamId IN :packageIds)
+            OR (o.type = BUNDLE AND o.steamId IN :bundleIds))
+        """)
+    List<PurchaseOption> findActiveOptions(List<Long> packageIds, List<Long> bundleIds);
 
     /** 종료 확인 대상인 내부 판매 구간이 아직 열려 있는지 확인한다. */
     Optional<PurchaseOption> findByIdAndSaleEndedAtIsNull(long id);
