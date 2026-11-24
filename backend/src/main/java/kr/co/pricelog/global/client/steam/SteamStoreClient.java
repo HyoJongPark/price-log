@@ -27,12 +27,15 @@ public class SteamStoreClient {
         """;
 
     private final RestClient restClient;
+    private final SteamRequestRetry steamRequestRetry;
 
     private final ObjectMapper objectMapper;
 
     /** 공개 상점 API에 연결한다. */
-    public SteamStoreClient(RestClient.Builder restClientBuilder, ObjectMapper objectMapper) {
+    public SteamStoreClient(RestClient.Builder restClientBuilder, ObjectMapper objectMapper,
+                            SteamRequestRetry steamRequestRetry) {
         this.objectMapper = objectMapper;
+        this.steamRequestRetry = steamRequestRetry;
         this.restClient = restClientBuilder.baseUrl(SteamApiConstants.BASE_URL).build();
     }
 
@@ -47,11 +50,11 @@ public class SteamStoreClient {
 
         String ids = steamAppIds.stream().map(id -> "{\"appid\":" + id + "}")
             .collect(Collectors.joining(","));
-        SteamStoreResponse result = restClient.get()
+        SteamStoreResponse result = steamRequestRetry.execute(() -> restClient.get()
             .uri("/IStoreBrowseService/GetItems/v1/?input_json={query}",
                 PURCHASE_OPTIONS_QUERY.formatted(ids))
             .retrieve()
-            .body(SteamStoreResponse.class);
+            .body(SteamStoreResponse.class));
 
         if (result == null || result.response() == null || result.response().items() == null) {
             throw new RestClientException("Steam 상점의 구매 옵션 조회 결과가 누락되었습니다");

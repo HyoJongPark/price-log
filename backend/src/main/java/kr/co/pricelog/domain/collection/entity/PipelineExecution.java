@@ -1,5 +1,6 @@
 package kr.co.pricelog.domain.collection.entity;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -7,7 +8,10 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import java.util.OptionalLong;
+import kr.co.pricelog.domain.collection.dto.SteamPriceCollectionPlan;
 import kr.co.pricelog.domain.collection.enums.PipelineExecutionStatus;
 import kr.co.pricelog.domain.collection.enums.PipelineType;
 import kr.co.pricelog.global.entity.BaseEntity;
@@ -31,6 +35,29 @@ public class PipelineExecution extends BaseEntity {
     private Long listCursor;
 
     private Instant finishedAt;
+
+    @Column(updatable = false)
+    private Long[] targetIds;
+
+    private Integer nextIndex;
+
+    private Long[] failedIds;
+
+    /** 완료한 회차는 다시 요청하지 않고, 미완료 회차는 고정된 입력과 진행 위치를 복원한다. */
+    public Optional<SteamPriceCollectionPlan> resumePriceCollection() {
+        if (status == PipelineExecutionStatus.COMPLETED) {
+            return Optional.empty();
+        }
+        resume();
+        return Optional.of(new SteamPriceCollectionPlan(List.of(targetIds), nextIndex,
+            List.of(failedIds)));
+    }
+
+    /** 이 회차의 모든 대상 처리를 마친 시각을 기록한다. */
+    public void complete(Instant completedAt) {
+        status = PipelineExecutionStatus.COMPLETED;
+        finishedAt = completedAt;
+    }
 
     /** 실패했던 목록을 마지막 커밋 위치에서 다시 연다. */
     public void resume() {
@@ -62,8 +89,7 @@ public class PipelineExecution extends BaseEntity {
             listCursor = lastAppId.getAsLong();
         }
         if (lastPage) {
-            status = PipelineExecutionStatus.COMPLETED;
-            finishedAt = observedAt;
+            complete(observedAt);
         }
     }
 }

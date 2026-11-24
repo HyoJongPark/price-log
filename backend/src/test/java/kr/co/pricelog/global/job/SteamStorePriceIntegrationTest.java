@@ -14,8 +14,9 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import kr.co.pricelog.domain.collection.service.SteamPriceCollectionService;
 import kr.co.pricelog.domain.game.service.GameCatalogService;
-import kr.co.pricelog.domain.purchaseoption.service.GamePurchaseOptionService;
+import kr.co.pricelog.global.client.steam.SteamRequestRetry;
 import kr.co.pricelog.global.client.steam.SteamStoreClient;
 import kr.co.pricelog.global.client.steam.dto.SteamApp;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
@@ -57,7 +58,7 @@ class SteamStorePriceIntegrationTest {
     private GameCatalogService gameCatalogService;
 
     @Autowired
-    private GamePurchaseOptionService gamePurchaseOptionService;
+    private SteamPriceCollectionService steamPriceCollectionService;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -73,7 +74,7 @@ class SteamStorePriceIntegrationTest {
         RestClient.Builder restClientBuilder = RestClient.builder();
         mockRestServiceServer = MockRestServiceServer.bindTo(restClientBuilder).build();
         steamStoreCollector = new SteamStoreCollector(new SteamStoreClient(restClientBuilder,
-            objectMapper), gamePurchaseOptionService);
+            objectMapper, new SteamRequestRetry()), steamPriceCollectionService);
         jdbcTemplate.execute("TRUNCATE price_history, game_purchase_option, purchase_option, game");
         gameCatalogService.applyPage(GAME, List.of(new SteamApp(301, "게임 A"),
             new SteamApp(302, "게임 B")), Instant.now());

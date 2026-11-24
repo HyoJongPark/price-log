@@ -23,12 +23,15 @@ public class SteamAppListClient {
         "{\"include_games\":%b,\"include_dlc\":%b,\"last_appid\":%d,\"max_results\":%d}";
 
     private final RestClient restClient;
+    private final SteamRequestRetry steamRequestRetry;
     private final String apiKey;
 
     /** 목록 API에서만 서버의 Web API 키로 인증한다. */
     public SteamAppListClient(RestClient.Builder restClientBuilder,
+                              SteamRequestRetry steamRequestRetry,
                               @Value("${STEAM_WEB_API_KEY}") String apiKey) {
         Assert.hasText(apiKey, "STEAM_WEB_API_KEY에 빈 값을 사용할 수 없습니다");
+        this.steamRequestRetry = steamRequestRetry;
         this.restClient = restClientBuilder.baseUrl(SteamApiConstants.BASE_URL).build();
         this.apiKey = apiKey;
     }
@@ -46,11 +49,11 @@ public class SteamAppListClient {
 
         String query = String.format(Locale.ROOT, PAGE_QUERY,
             type == SteamAppType.GAME, type == SteamAppType.DLC, lastAppId, pageSize);
-        SteamAppListResponse result = restClient.get()
+        SteamAppListResponse result = steamRequestRetry.execute(() -> restClient.get()
             .uri("/IStoreService/GetAppList/v1/?input_json={query}", query)
             .header("x-webapi-key", apiKey)
             .retrieve()
-            .body(SteamAppListResponse.class);
+            .body(SteamAppListResponse.class));
 
         if (result == null || result.response() == null) {
             throw new RestClientException("Steam 목록 응답이 누락되었습니다");
