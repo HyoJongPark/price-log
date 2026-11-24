@@ -313,6 +313,38 @@ class SteamStorePriceIntegrationTest {
     }
 
     @Test
+    @DisplayName("공유 상품의 첫 가격이 보호 회차의 이력 보충이면 뒤의 정상 게임도 현재가를 바꾸지 않는다")
+    void keepsHistoryOnlyWhenProtectedGameOwnsFirstSharedObservation() {
+        // given
+        respond(301, DISCOUNT);
+        // 첫 게임은 종료한 패키지에 연결되어 보호된다. 두 번째 게임은 계속 판매 중인 번들만 제공한다.
+        String sharedBundle = """
+            {"item_type":0,"success":1,"id":%d,"purchase_options":[{"bundleid":31,%s}]}
+            """;
+        String laterPrice = """
+            "final_price_in_cents":"200000","formatted_final_price":"₩ 2,000"
+            """;
+        respondWithItems(sharedBundle.formatted(302, laterPrice) + ","
+            + sharedBundle.formatted(301, DISCOUNT));
+
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), SLOT);
+        gamePurchaseOptionService.endSale(activePackageId(), SALE_END);
+        Instant lateSlot = SALE_END.minusSeconds(1);
+
+        // when
+        steamStoreCollector.collectPurchaseOptions(List.of(301L, 302L), lateSlot);
+
+        // then
+        assertThat(jdbcTemplate.queryForMap("""
+            SELECT o.current_price, h.current_price AS historical
+            FROM purchase_option o JOIN price_history h ON h.purchase_option_id = o.id
+            WHERE o.type = 'BUNDLE' AND h.slot_at = ?
+            """, Timestamp.from(lateSlot)))
+            .containsEntry("current_price", 0L).containsEntry("historical", 1000L);
+        mockRestServiceServer.verify();
+    }
+
+    @Test
     @DisplayName("이전에 연결되지 않은 게임의 과거 응답에 종료된 패키지가 있어도 새로 연결하지 않는다")
     void skipsEndedPackageInUnlinkedGameResponse() {
         respond(301, DISCOUNT);

@@ -16,6 +16,17 @@ public interface GameRepository extends Repository<Game, Long> {
     /** 한 배치의 상점 응답에 대응하는 활성 카탈로그 항목을 조회한다. */
     List<Game> findAllBySteamAppIdIn(Collection<Long> steamAppIds);
 
+    /** 한 배치에서 달라진 상점 상태만 갱신한다. */
+    @Modifying
+    @Query(value = """
+        UPDATE game g SET store_visibility = s.visibility, is_free = s.free,
+            updated_at = CURRENT_TIMESTAMP
+        FROM unnest(CAST(:ids AS bigint[]), CAST(:visibility AS text[]),
+                    CAST(:free AS boolean[])) AS s(id, visibility, free)
+        WHERE g.id = s.id AND g.deleted_at IS NULL
+        """, nativeQuery = true)
+    void updateStoreStates(Long[] ids, String[] visibility, Boolean[] free);
+
     /** 같은 앱이 겹치면 목록에서 얻은 필드만 갱신한다. */
     @Modifying
     @Query(value = """

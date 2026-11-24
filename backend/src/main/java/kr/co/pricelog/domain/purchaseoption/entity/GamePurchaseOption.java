@@ -35,16 +35,4 @@ public class GamePurchaseOption extends BaseEntity {
 
     @Column(name = "is_best_option", nullable = false)
     private boolean bestOption;
-
-    /** 게임의 구매 옵션 목록에 새 상품을 연결한다. */
-    public GamePurchaseOption(Game game, PurchaseOption purchaseOption, boolean bestOption) {
-        this.game = game;
-        this.purchaseOption = purchaseOption;
-        this.bestOption = bestOption;
-    }
-
-    /** Steam이 이 게임에서 지정한 기본 옵션인지 반영한다. */
-    public void setBestOption(boolean bestOption) {
-        this.bestOption = bestOption;
-    }
 }

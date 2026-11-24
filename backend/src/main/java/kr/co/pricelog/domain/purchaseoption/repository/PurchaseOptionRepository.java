@@ -44,6 +44,18 @@ public interface PurchaseOptionRepository extends Repository<PurchaseOption, Lon
         """, nativeQuery = true)
     List<ClosedPurchaseOption> findClosedSince(Instant slotAt);
 
-    /** 새 판매 구간을 저장한다. */
-    PurchaseOption save(PurchaseOption purchaseOption);
+    /** 새 상품과 이름이 달라진 상품을 쓰고, 이번 배치의 연결과 가격에 사용할 내부 ID를 반환한다. */
+    @Query(value = """
+        WITH saved AS (
+            INSERT INTO purchase_option (type, steam_id, name, created_at, updated_at)
+            SELECT type, steam_id, name, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            FROM unnest(CAST(:types AS text[]), CAST(:steamIds AS bigint[]),
+                        CAST(:names AS text[])) AS s(type, steam_id, name)
+            ON CONFLICT (type, steam_id) WHERE deleted_at IS NULL AND sale_ended_at IS NULL
+            DO UPDATE SET name = EXCLUDED.name, updated_at = CURRENT_TIMESTAMP
+            RETURNING *
+        )
+        SELECT * FROM saved
+        """, nativeQuery = true)
+    List<PurchaseOption> saveNames(String[] types, Long[] steamIds, String[] names);
 }

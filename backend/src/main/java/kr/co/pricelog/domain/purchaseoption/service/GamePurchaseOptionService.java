@@ -1,19 +1,20 @@
 package kr.co.pricelog.domain.purchaseoption.service;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import kr.co.pricelog.domain.game.entity.Game;
 import kr.co.pricelog.domain.game.enums.StoreVisibility;
 import kr.co.pricelog.domain.game.repository.GameRepository;
 import kr.co.pricelog.domain.price.repository.PriceHistoryRepository;
 import kr.co.pricelog.domain.purchaseoption.dto.ClosedPurchaseOption;
-import kr.co.pricelog.domain.purchaseoption.entity.GamePurchaseOption;
 import kr.co.pricelog.domain.purchaseoption.entity.PurchaseOption;
 import kr.co.pricelog.domain.purchaseoption.repository.GamePurchaseOptionRepository;
 import kr.co.pricelog.domain.purchaseoption.repository.PurchaseOptionRepository;
@@ -61,25 +62,72 @@ public class GamePurchaseOptionService {
         Map<PurchaseOptionKey, PurchaseOption> activeOptions =
             loadActiveOptions(confirmed.values());
         ClosedSales closedSales = loadClosedSales(slotAt);
-        confirmed.forEach((appId, options) -> {
-            Game game = gamesByAppId.get(appId);
+        List<GameState> changedGames = new ArrayList<>();
+        Set<Long> confirmedGameIds = new HashSet<>();
+        Map<PurchaseOptionKey, String> names = new HashMap<>();
+        Map<Link, Boolean> links = new LinkedHashMap<>();
+        Map<PurchaseOptionKey, Observation> prices = new LinkedHashMap<>();
+
+        for (Map.Entry<Long, SteamPurchaseOptions> entry : confirmed.entrySet()) {
+            Game game = gamesByAppId.get(entry.getKey());
             if (game == null) {
-                throw new IllegalStateException("활성 카탈로그에 없는 Steam 앱: " + appId);
+                throw new IllegalStateException("활성 카탈로그에 없는 Steam 앱: " + entry.getKey());
             }
 
-            game.updateStoreVisibility(options.storeVisibility());
-            if (options.storeVisibility() != StoreVisibility.VISIBLE) {
-                // 상점 비노출 응답으로는 구매 옵션이나 무료 여부의 변화를 판정할 수 없다.
-                return;
+            SteamPurchaseOptions result = entry.getValue();
+            boolean visible = result.storeVisibility() == StoreVisibility.VISIBLE;
+            boolean protectedSale = visible && isAffectedBySaleEnd(entry.getKey(), result,
+                closedSales);
+            Boolean free = visible && !protectedSale ? result.freeToPlay() : game.getFreeToPlay();
+            if (game.getStoreVisibility() != result.storeVisibility()
+                || !Objects.equals(game.getFreeToPlay(), free)) {
+                changedGames.add(new GameState(game.getId(), result.storeVisibility(), free));
+            }
+            if (!visible) {
+                continue;
             }
 
-            if (isAffectedBySaleEnd(appId, options, closedSales)) {
-                recordUnchangedOptionHistory(options, activeOptions, closedSales.endedOptions(),
-                    slotAt, observedAt);
-            } else {
-                updateGameOptions(game, options, activeOptions, slotAt, observedAt);
+            if (protectedSale) {
+                collectHistoricalPrices(result, closedSales.endedOptions(), activeOptions.keySet(),
+                    names.keySet(), prices);
+                continue;
             }
-        });
+
+            // 빈 목록도 정상 응답이면 이 게임의 기존 연결을 닫는다.
+            confirmedGameIds.add(game.getId());
+            for (SteamPurchaseOption option : result.purchaseOptions()) {
+                PurchaseOptionKey key = new PurchaseOptionKey(option.type(), option.steamId());
+                names.put(key, option.name());
+                links.put(new Link(game.getId(), key), option.equals(result.bestPurchaseOption()));
+                collectFirstPrice(prices, key, option.price(), true);
+            }
+        }
+
+        saveGameStates(changedGames);
+        saveChangedNames(names, activeOptions);
+        saveLinks(confirmedGameIds, links, activeOptions, observedAt);
+        savePrices(prices, activeOptions, slotAt, observedAt);
+    }
+
+    /** 과거 회차에서는 요청 순서상 이미 확인한 상품 중 판매가 이어진 상품의 이력만 보충한다. */
+    private void collectHistoricalPrices(SteamPurchaseOptions result, Set<PurchaseOptionKey> ended,
+                                         Set<PurchaseOptionKey> active,
+                                         Set<PurchaseOptionKey> seenInBatch,
+                                         Map<PurchaseOptionKey, Observation> prices) {
+        for (SteamPurchaseOption option : result.purchaseOptions()) {
+            PurchaseOptionKey key = new PurchaseOptionKey(option.type(), option.steamId());
+            if (!ended.contains(key) && (active.contains(key) || seenInBatch.contains(key))) {
+                collectFirstPrice(prices, key, option.price(), false);
+            }
+        }
+    }
+
+    /** 공유 상품은 요청 순서의 첫 유효 가격과 그 관측의 현재가 갱신 여부를 함께 보존한다. */
+    private void collectFirstPrice(Map<PurchaseOptionKey, Observation> prices,
+                                   PurchaseOptionKey key, SteamPrice price, boolean updateLatest) {
+        if (price != null) {
+            prices.putIfAbsent(key, new Observation(price, updateLatest));
+        }
     }
 
     private Map<PurchaseOptionKey, PurchaseOption> loadActiveOptions(
@@ -130,87 +178,77 @@ public class GamePurchaseOptionService {
                 new PurchaseOptionKey(option.type(), option.steamId())));
     }
 
-    /** 과거 회차를 재생할 때는 판매가 이어진 기존 상품의 가격 이력만 보충한다. 현재가와 게임 연결은 유지한다. */
-    private void recordUnchangedOptionHistory(SteamPurchaseOptions result,
-                                              Map<PurchaseOptionKey, PurchaseOption> activeOptions,
-                                              Set<PurchaseOptionKey> endedOptions,
-                                              Instant slotAt, Instant observedAt) {
-        for (SteamPurchaseOption option : result.purchaseOptions()) {
-            SteamPrice price = option.price();
-            PurchaseOptionKey key = new PurchaseOptionKey(option.type(), option.steamId());
-            if (price == null || endedOptions.contains(key)) {
-                continue;
-            }
+    private void saveGameStates(List<GameState> changedGames) {
+        if (!changedGames.isEmpty()) {
+            gameRepository.updateStoreStates(
+                changedGames.stream().map(GameState::id).toArray(Long[]::new),
+                changedGames.stream().map(s -> s.visibility().name()).toArray(String[]::new),
+                changedGames.stream().map(GameState::free).toArray(Boolean[]::new));
+        }
+    }
 
+    private void saveChangedNames(Map<PurchaseOptionKey, String> names,
+                                  Map<PurchaseOptionKey, PurchaseOption> activeOptions) {
+        List<PurchaseOptionKey> changed = names.keySet().stream().filter(key -> {
             PurchaseOption active = activeOptions.get(key);
-            if (active != null) {
-                insertPriceHistory(active, price, slotAt, observedAt);
-            }
+            return active == null || !Objects.equals(active.getName(), names.get(key));
+        }).toList();
+        if (changed.isEmpty()) {
+            return;
+        }
+
+        String[] types = changed.stream().map(key -> key.type().name()).toArray(String[]::new);
+        Long[] ids = changed.stream().map(PurchaseOptionKey::steamId).toArray(Long[]::new);
+        String[] changedNames = changed.stream().map(names::get).toArray(String[]::new);
+        for (PurchaseOption option : purchaseOptionRepository.saveNames(types, ids, changedNames)) {
+            activeOptions.put(new PurchaseOptionKey(option.getType(), option.getSteamId()), option);
         }
     }
 
-    private void updateGameOptions(Game game, SteamPurchaseOptions result,
-                                   Map<PurchaseOptionKey, PurchaseOption> activeOptions,
-                                   Instant slotAt, Instant observedAt) {
-        game.updateFreeToPlay(result.freeToPlay());
-
-        Map<PurchaseOption, Boolean> incomingOptions = new LinkedHashMap<>();
-        for (SteamPurchaseOption steamOption : result.purchaseOptions()) {
-            PurchaseOption purchaseOption = resolvePurchaseOption(steamOption, activeOptions);
-            SteamPrice price = steamOption.price();
-            // 여러 게임에서 같은 상품을 팔아도 해당 회차의 첫 가격만 현재가 갱신에 사용한다.
-            if (price != null && insertPriceHistory(purchaseOption, price, slotAt, observedAt)) {
-                purchaseOption.updatePrice(price, observedAt);
-            }
-            incomingOptions.put(purchaseOption, steamOption.equals(result.bestPurchaseOption()));
-        }
-        updateGameLinks(game, incomingOptions, observedAt);
-    }
-
-    private boolean insertPriceHistory(PurchaseOption option, SteamPrice price, Instant slotAt,
-                                       Instant observedAt) {
-        return priceHistoryRepository.recordPrice(option.getId(), slotAt, observedAt,
-            price.currentPrice(), price.regularPrice(), price.discountEndsAt()) == 1;
-    }
-
-    private PurchaseOption resolvePurchaseOption(
-            SteamPurchaseOption option, Map<PurchaseOptionKey, PurchaseOption> activeOptions) {
-        PurchaseOptionKey key = new PurchaseOptionKey(option.type(), option.steamId());
-        // 새 상품도 이 배치의 조회 결과에 넣어 다음 게임이 같은 상품을 판매하면 같은 행에 연결한다.
-        PurchaseOption purchaseOption = activeOptions.computeIfAbsent(key,
-            missing -> purchaseOptionRepository.save(
-                new PurchaseOption(missing.type(), missing.steamId(), option.name())));
-        purchaseOption.updateName(option.name());
-        return purchaseOption;
-    }
-
-    /** 응답에서 빠진 상품은 이 게임과의 연결만 닫는다. 기존 연결과 대조하고 맵에 남은 상품은 새로 연결한다. */
-    private void updateGameLinks(Game game, Map<PurchaseOption, Boolean> incomingOptions,
-                                 Instant observedAt) {
-        GamePurchaseOption retainedBest = null;
-
-        List<GamePurchaseOption> activeLinks = gamePurchaseOptionRepository.findByGame(game);
-        for (GamePurchaseOption link : activeLinks) {
-            Boolean selected = incomingOptions.remove(link.getPurchaseOption());
-            if (selected == null) {
-                link.markDeleted(observedAt);
-            } else if (selected) {
-                retainedBest = link;
-            } else {
-                link.setBestOption(false);
-            }
+    private void saveLinks(Set<Long> confirmedGames, Map<Link, Boolean> links,
+                           Map<PurchaseOptionKey, PurchaseOption> active, Instant observedAt) {
+        if (confirmedGames.isEmpty()) {
+            return;
         }
 
-        // 기존 대표의 해제·종료를 먼저 반영해야 게임당 대표 한 건 제약을 지킬 수 있다.
-        gamePurchaseOptionRepository.flush();
-        if (retainedBest != null) {
-            retainedBest.setBestOption(true);
+        Long[] games = links.keySet().stream().map(Link::gameId).toArray(Long[]::new);
+        Long[] options = links.keySet().stream().map(link -> active.get(link.option()).getId())
+            .toArray(Long[]::new);
+        Boolean[] best = links.values().toArray(Boolean[]::new);
+
+        // 게임당 대표 한 건 제약을 위해 기존 대표 해제·종료 후 새 대표를 반영한다.
+        gamePurchaseOptionRepository.closeOrRelease(confirmedGames.toArray(Long[]::new), games,
+            options, best, observedAt);
+        if (!links.isEmpty()) {
+            gamePurchaseOptionRepository.saveLinks(games, options, best);
         }
-        incomingOptions.forEach((option, selected) ->
-            gamePurchaseOptionRepository.save(new GamePurchaseOption(game, option, selected)));
     }
+
+    private void savePrices(Map<PurchaseOptionKey, Observation> prices,
+                            Map<PurchaseOptionKey, PurchaseOption> active, Instant slotAt,
+                            Instant observedAt) {
+        if (prices.isEmpty()) {
+            return;
+        }
+
+        Long[] ids = prices.keySet().stream().map(key -> active.get(key).getId())
+            .toArray(Long[]::new);
+        List<SteamPrice> values = prices.values().stream().map(Observation::price).toList();
+        priceHistoryRepository.recordPrices(ids,
+            values.stream().map(SteamPrice::currentPrice).toArray(Long[]::new),
+            values.stream().map(SteamPrice::regularPrice).toArray(Long[]::new),
+            values.stream().map(SteamPrice::discountEndsAt).toArray(Instant[]::new),
+            prices.values().stream().map(Observation::updateLatest).toArray(Boolean[]::new),
+            slotAt, observedAt);
+    }
+
+    private record GameState(long id, StoreVisibility visibility, Boolean free) {}
 
     private record PurchaseOptionKey(SteamPurchaseOptionType type, long steamId) {}
+
+    private record Link(long gameId, PurchaseOptionKey option) {}
+
+    private record Observation(SteamPrice price, boolean updateLatest) {}
 
     private record ClosedSales(Set<Long> protectedAppIds, Set<PurchaseOptionKey> endedOptions) {}
 }
