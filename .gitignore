@@ -9,5 +9,6 @@
 /backend/.gradle/
 /backend/.env
 /backend/build/
+/backend/bin/
 /frontend/node_modules/
 /frontend/dist/
