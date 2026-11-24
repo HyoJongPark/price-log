@@ -3,8 +3,10 @@ package kr.co.pricelog;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /** 프라이스로그 백엔드의 Spring Boot 진입점. */
+@EnableScheduling
 @EnableJpaAuditing
 @SpringBootApplication
 public class PriceLogApplication {

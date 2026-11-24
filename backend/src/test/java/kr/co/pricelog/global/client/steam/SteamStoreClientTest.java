@@ -4,6 +4,7 @@ import static kr.co.pricelog.global.client.steam.enums.SteamPurchaseOptionType.B
 import static kr.co.pricelog.global.client.steam.enums.SteamPurchaseOptionType.PACKAGE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.anything;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,9 +22,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.test.web.client.ResponseActions;
 import org.springframework.web.client.RestClient;
 
 class SteamStoreClientTest {
@@ -38,6 +41,28 @@ class SteamStoreClientTest {
     @Nested
     @DisplayName("한국 상점의 본편 구매 옵션 조회")
     class PurchaseOptions {
+
+        @Test
+        @DisplayName("414이면 묶음을 나누고 두 응답의 성공 앱을 원래 요청 순서대로 합친다")
+        void splitsLongUri() {
+            // given
+            expectAppIds(List.of(7L, 4L, 1L)).andRespond(withStatus(HttpStatus.URI_TOO_LONG));
+            expectAppIds(List.of(7L)).andRespond(withSuccess("""
+                {"response":{"store_items":[{"id":7,"item_type":0,"success":1}]}}
+                """, MediaType.APPLICATION_JSON));
+            expectAppIds(List.of(4L, 1L)).andRespond(withSuccess("""
+                {"response":{"store_items":[{"id":1,"item_type":0,"success":1},
+                    {"id":4,"item_type":0,"success":15}]}}
+                """, MediaType.APPLICATION_JSON));
+
+            // when
+            Map<Long, SteamPurchaseOptions> result = steamStoreClient.getPurchaseOptions(
+                List.of(7L, 4L, 1L));
+
+            // then
+            assertThat(result.keySet()).containsExactly(7L, 1L);
+            mockRestServiceServer.verify();
+        }
 
         @ParameterizedTest
         @CsvSource({"true,true", "false,false"})
@@ -286,6 +311,14 @@ class SteamStoreClientTest {
         assertThat(result.keySet()).containsExactly(1L, 5L);
         assertThat(result.get(5L).freeToPlay()).isTrue();
         mockRestServiceServer.verify();
+    }
+
+    private ResponseActions expectAppIds(List<Long> ids) {
+        return mockRestServiceServer.expect(request -> {
+            String query = request.getURI().getQuery().substring("input_json=".length());
+            assertThat(objectMapper.readTree(query).get("ids").findValues("appid"))
+                .extracting(id -> id.longValue()).containsExactlyElementsOf(ids);
+        });
     }
 
     private void respondWithItems(String items) {

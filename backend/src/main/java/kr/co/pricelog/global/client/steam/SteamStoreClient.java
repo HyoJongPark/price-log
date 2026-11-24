@@ -13,7 +13,9 @@ import kr.co.pricelog.global.client.steam.constants.SteamApiConstants;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
 import kr.co.pricelog.global.client.steam.dto.SteamStoreItem;
 import kr.co.pricelog.global.client.steam.dto.SteamStoreResponse;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -48,6 +50,22 @@ public class SteamStoreClient {
             return Map.of();
         }
 
+        try {
+            return requestOptions(steamAppIds);
+        } catch (HttpClientErrorException failure) {
+            if (failure.getStatusCode() != HttpStatus.URI_TOO_LONG || steamAppIds.size() == 1) {
+                throw failure;
+            }
+            // 앱 번호의 자릿수에 따라 같은 묶음 크기도 URL 길이 제한을 넘을 수 있다.
+            int middle = steamAppIds.size() / 2;
+            Map<Long, SteamPurchaseOptions> confirmed = new LinkedHashMap<>(
+                getPurchaseOptions(steamAppIds.subList(0, middle)));
+            confirmed.putAll(getPurchaseOptions(steamAppIds.subList(middle, steamAppIds.size())));
+            return Collections.unmodifiableMap(confirmed);
+        }
+    }
+
+    private Map<Long, SteamPurchaseOptions> requestOptions(List<Long> steamAppIds) {
         String ids = steamAppIds.stream().map(id -> "{\"appid\":" + id + "}")
             .collect(Collectors.joining(","));
         SteamStoreResponse result = steamRequestRetry.execute(() -> restClient.get()

@@ -11,3 +11,9 @@ spring:
     url: jdbc:postgresql://127.0.0.1:55436/pricelog
     username: pricelog
     password: pricelog_local
+
+pricelog:
+  collection:
+    daily:
+      enabled: true
+      batch-size: 260

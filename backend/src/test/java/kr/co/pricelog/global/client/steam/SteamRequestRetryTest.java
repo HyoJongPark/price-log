@@ -33,6 +33,20 @@ class SteamRequestRetryTest {
         new SteamStoreClient(builder, new ObjectMapper(), steamRequestRetry);
 
     @Test
+    @DisplayName("정상 응답 뒤에도 같은 호스트의 다음 요청은 실측한 간격을 지킨다")
+    void spacesSuccessfulRequests() {
+        // given
+        Instant completedAt = steamRequestRetry.execute(Instant::now);
+
+        // when
+        Instant nextStart = steamRequestRetry.execute(Instant::now);
+
+        // then
+        assertThat(Duration.between(completedAt, nextStart))
+            .isGreaterThanOrEqualTo(Duration.ofMillis(600));
+    }
+
+    @Test
     @DisplayName("대기 헤더가 없는 연속 429에는 1초와 2초 이상 기다린 후 같은 요청을 재시도한다")
     void backsOffOnRepeatedRateLimits() {
         // given
