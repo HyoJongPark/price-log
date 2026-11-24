@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import kr.co.pricelog.domain.game.entity.Game;
+import kr.co.pricelog.domain.game.enums.StoreVisibility;
 import kr.co.pricelog.domain.game.repository.GameRepository;
 import kr.co.pricelog.domain.price.repository.PriceHistoryRepository;
 import kr.co.pricelog.domain.purchaseoption.dto.ClosedPurchaseOption;
@@ -64,6 +65,12 @@ public class GamePurchaseOptionService {
             Game game = gamesByAppId.get(appId);
             if (game == null) {
                 throw new IllegalStateException("활성 카탈로그에 없는 Steam 앱: " + appId);
+            }
+
+            game.updateStoreVisibility(options.storeVisibility());
+            if (options.storeVisibility() != StoreVisibility.VISIBLE) {
+                // 상점 비노출 응답으로는 구매 옵션이나 무료 여부의 변화를 판정할 수 없다.
+                return;
             }
 
             if (isAffectedBySaleEnd(appId, options, closedSales)) {

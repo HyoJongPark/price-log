@@ -1,11 +1,19 @@
 package kr.co.pricelog.global.client.steam.dto;
 
 import java.util.List;
+import kr.co.pricelog.domain.game.enums.StoreVisibility;
 import org.springframework.web.client.RestClientException;
 
 /** 한국 상점의 전체 구매 옵션과 Steam이 지정한 기본 옵션. 지정이 없으면 기본 옵션은 null이다. */
 public record SteamPurchaseOptions(List<SteamPurchaseOption> purchaseOptions,
-                                   SteamPurchaseOption bestPurchaseOption, Boolean freeToPlay) {
+                                   SteamPurchaseOption bestPurchaseOption, Boolean freeToPlay,
+                                   StoreVisibility storeVisibility) {
+
+    /** 정상 조회한 상점의 구매 옵션과 무료 여부를 전달한다. */
+    public SteamPurchaseOptions(List<SteamPurchaseOption> options, SteamPurchaseOption best,
+                                Boolean freeToPlay) {
+        this(options, best, freeToPlay, StoreVisibility.VISIBLE);
+    }
 
     /** 기본 옵션의 종류와 ID를 구매 목록에 대응시켜 해당 목록의 상품을 반환한다. */
     public SteamPurchaseOptions {

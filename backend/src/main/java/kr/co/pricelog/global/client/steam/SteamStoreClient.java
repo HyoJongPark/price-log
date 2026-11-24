@@ -7,8 +7,10 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import kr.co.pricelog.domain.game.enums.StoreVisibility;
 import kr.co.pricelog.global.client.steam.constants.SteamApiConstants;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
 import kr.co.pricelog.global.client.steam.dto.SteamStoreItem;
@@ -22,6 +24,10 @@ import org.springframework.web.client.RestClientException;
 /** Steam 한국 상점에서 구매할 수 있는 상품을 조회한다. */
 @Component
 public class SteamStoreClient {
+
+    private static final int APP_ITEM_TYPE = 0;
+    private static final int SUCCESS = 1;
+    private static final int ACCESS_DENIED = 15;
 
     private static final String PURCHASE_OPTIONS_QUERY = """
         {"ids":[%s],"context":{"country_code":"KR","language":"koreana"},
@@ -42,7 +48,7 @@ public class SteamStoreClient {
     }
 
     /**
-     * 한국 상점에 한 번 요청해 구매 옵션을 확인한 본편만 요청 순서대로 반환한다.
+     * 한국 상점에서 구매 옵션 또는 미노출 상태를 확인한 앱을 요청 순서대로 반환한다.
      * 입력은 카탈로그의 game.steam_app_id에서 읽으며, DB 제약이 ID 범위와 고유성을 보장한다.
      */
     public Map<Long, SteamPurchaseOptions> getPurchaseOptions(List<Long> steamAppIds) {
@@ -84,14 +90,13 @@ public class SteamStoreClient {
 
         Map<Long, SteamPurchaseOptions> confirmed = new LinkedHashMap<>();
         for (long steamAppId : steamAppIds) {
-            readPurchaseOptions(steamAppId, itemsById.get(steamAppId))
+            readPurchaseOptions(itemsById.get(steamAppId))
                 .ifPresent(options -> confirmed.put(steamAppId, options));
         }
         return Collections.unmodifiableMap(confirmed);
     }
 
-    private Optional<SteamPurchaseOptions> readPurchaseOptions(long steamAppId,
-                                                               List<JsonNode> items) {
+    private Optional<SteamPurchaseOptions> readPurchaseOptions(List<JsonNode> items) {
         // TODO: 로깅 도입 시 제외된 앱 ID와 Steam 결과 코드·누락·중복·해석 실패 사유를 기록한다.
         if (items == null || items.size() != 1) {
             return Optional.empty();
@@ -99,14 +104,29 @@ public class SteamStoreClient {
 
         try {
             SteamStoreItem item = objectMapper.treeToValue(items.getFirst(), SteamStoreItem.class);
-            if (!item.isAppResultFor(steamAppId)) {
-                return Optional.empty();
-            }
-
-            return Optional.of(new SteamPurchaseOptions(item.options(), item.bestPurchaseOption(),
-                item.freeToPlay()));
+            return confirmedPurchaseOptions(item);
         } catch (JsonProcessingException | RestClientException ignored) {
             return Optional.empty();
         }
+    }
+
+    private static Optional<SteamPurchaseOptions> confirmedPurchaseOptions(SteamStoreItem item) {
+        if (!Objects.equals(item.itemType(), APP_ITEM_TYPE)) {
+            return Optional.empty();
+        }
+
+        // 국가 제한 앱에서도 visible=false가 올 수 있어 명시된 사유를 먼저 확인한다.
+        boolean regionRestricted = Boolean.TRUE.equals(item.regionRestricted());
+        boolean hidden = Boolean.FALSE.equals(item.visible());
+        if (item.success() == ACCESS_DENIED && (regionRestricted || hidden)) {
+            StoreVisibility visibility = regionRestricted
+                ? StoreVisibility.REGION_RESTRICTED : StoreVisibility.HIDDEN;
+            return Optional.of(new SteamPurchaseOptions(List.of(), null, null, visibility));
+        }
+        if (item.success() == SUCCESS && !regionRestricted && !hidden) {
+            return Optional.of(new SteamPurchaseOptions(item.options(), item.bestPurchaseOption(),
+                item.freeToPlay()));
+        }
+        return Optional.empty();
     }
 }

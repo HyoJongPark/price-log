@@ -42,7 +42,18 @@
 
 ## 게임별 구매 옵션 저장
 
-`SteamStoreCollector.collectPurchaseOptions(steamAppIds, slotAt)`는 확인된 게임을 요청 순서대로 저장한다. 트랜잭션 하나에 해당 묶음에서 확인한 게임들의 무료 표기·구매 옵션·가격을 반영한다. 반환된 맵에는 확인된 앱 ID와 구매 옵션만 들어간다. 앱 조회가 실패하거나 응답이 누락·중복되거나 해석에 실패하면 해당 게임은 저장을 건너뛰어 기존 연결과 대표 지정을 유지한다. 정상 응답에서 구매 옵션이 비어 있으면 그 게임의 활성 연결을 닫는다. HTTP 요청 자체가 실패하면 해당 묶음의 저장을 시작하지 않는다. `purchase_option`은 종류(PACKAGE·BUNDLE)와 Steam ID로 활성 판매 상품을 식별한다. 여러 게임이 같은 상품을 팔면 상품 한 행을 공유하고, `game_purchase_option`은 `game_id`와 `purchase_option_id`로 게임과 구매 옵션을 다대다로 연결한다.
+`SteamStoreCollector.collectPurchaseOptions(steamAppIds, slotAt)`는 확인된 게임을 요청 순서대로 저장한다. 트랜잭션 하나에 해당 묶음에서 확인한 게임들의 무료 표기·구매 옵션·가격을 반영한다. 반환된 맵에는 정상 조회한 앱과 Steam이 한국 판매 제한 또는 상점 미노출을 명시한 앱이 들어간다. 실패 사유를 판정할 수 없거나 응답이 누락·중복되거나 해석에 실패하면 해당 게임은 저장을 건너뛰어 기존 연결과 대표 지정을 유지한다. 정상 응답에서 구매 옵션이 비어 있으면 그 게임의 활성 연결을 닫는다. HTTP 요청 자체가 실패하면 해당 묶음의 저장을 시작하지 않는다. `purchase_option`은 종류(PACKAGE·BUNDLE)와 Steam ID로 활성 판매 상품을 식별한다. 여러 게임이 같은 상품을 팔면 상품 한 행을 공유하고, `game_purchase_option`은 `game_id`와 `purchase_option_id`로 게임과 구매 옵션을 다대다로 연결한다.
+
+게임별 한국 상점 노출 상태를 `game.store_visibility`에 저장한다. 기존 행과 아직 조회하지 않은 앱은 `NULL`이다.
+
+| 같은 앱 ID의 한국 GetItems 응답 | 저장값 | 처리 |
+| --- | --- | --- |
+| 정상 앱 응답 | `VISIBLE` | 구매 옵션·무료 여부·가격을 반영한다. 이전에 제한됐던 앱도 같은 규칙으로 갱신한다. |
+| `success=15`이고 `unvailable_for_country_restriction=true` | `REGION_RESTRICTED` | 한국 판매 제한을 기록한다. 동시에 `visible=false`여도 이 판정이 우선한다. |
+| `success=15`, 국가 제한 표시 없음, `visible=false` | `HIDDEN` | 한국 상점에서 페이지가 보이지 않는다는 관측을 기록한다. 영구 판매 종료 여부는 미확인이다. |
+| ID 누락·중복, 모호한 실패 등 | 마지막 값 유지 | 회차의 미확인 ID로 남겨 재시도한다. |
+
+제한·미노출 응답은 노출 상태만 갱신한다. 해당 회차에서 처리를 마치고, 다음 정기 관측에서 다시 확인한다. 기존 무료 여부, 대표 구매 옵션, 현재가와 가격 이력은 보존한다.
 
 `game_purchase_option.is_best_option`은 Steam이 해당 게임에서 지정한 옵션 한 건에만 true다. 정상 응답에서 기본 지정이 생략되면 대표 선택을 해제한다. 목록에서 빠진 상품은 해당 게임의 연결만 닫는다. 조회가 실패하거나 지정된 옵션을 목록에서 식별할 수 없으면 마지막 성공 상태를 유지한다.
 

@@ -215,6 +215,9 @@ class SteamStoreClientTest {
         @ParameterizedTest
         @ValueSource(strings = {
             "[]",
+            "[{\"item_type\":0,\"id\":570,\"success\":15}]",
+            "[{\"item_type\":0,\"id\":570,\"success\":2,\"visible\":false}]",
+            "[{\"item_type\":1,\"id\":570,\"success\":15,\"visible\":false}]",
             "[{\"item_type\":0,\"id\":10,\"success\":1}]",
             "[{\"item_type\":1,\"id\":570,\"success\":1}]",
             "[{\"item_type\":0,\"id\":570,\"success\":2}]"})

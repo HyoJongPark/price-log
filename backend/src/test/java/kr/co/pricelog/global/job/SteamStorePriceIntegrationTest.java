@@ -83,7 +83,9 @@ class SteamStorePriceIntegrationTest {
         mockRestServiceServer = MockRestServiceServer.bindTo(restClientBuilder).build();
         steamStoreCollector = new SteamStoreCollector(new SteamStoreClient(restClientBuilder,
             objectMapper, new SteamRequestRetry()), steamPriceCollectionService);
-        jdbcTemplate.execute("TRUNCATE price_history, game_purchase_option, purchase_option, game");
+        jdbcTemplate.execute("""
+            TRUNCATE pipeline_execution, price_history, game_purchase_option, purchase_option, game
+            """);
         gameCatalogService.applyPage(GAME, List.of(new SteamApp(301, "게임 A"),
             new SteamApp(302, "게임 B")), Instant.now());
     }
@@ -403,6 +405,67 @@ class SteamStorePriceIntegrationTest {
 
         assertThat(jdbcTemplate.queryForList(bestLink, Long.class, resaleAppId))
             .containsExactly(linkId);
+        mockRestServiceServer.verify();
+    }
+
+    @Test
+    @DisplayName("한국 판매 제한과 미노출은 서로 다른 상태로 저장하고 가격 재시도 없이 회차를 완료한다")
+    void completesCollectionWithRestrictedAndHiddenGames() {
+        // given
+        respondWithItems("""
+            {"item_type":0,"id":301,"success":15,"visible":false,
+             "unvailable_for_country_restriction":true},
+            {"item_type":0,"id":302,"success":15,"visible":false,"appid":0}
+            """);
+
+        // when
+        steamStoreCollector.collectAll(SLOT, 2);
+
+        // then
+        mockRestServiceServer.verify();
+        assertThat(jdbcTemplate.queryForList(
+            "SELECT store_visibility FROM game ORDER BY steam_app_id", String.class))
+            .containsExactly("REGION_RESTRICTED", "HIDDEN");
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT status FROM pipeline_execution WHERE pipeline = 'STEAM_PRICE'
+            AND scheduled_at = ? AND next_index = 2 AND cardinality(failed_ids) = 0
+            """, String.class, Timestamp.from(SLOT))).isEqualTo("COMPLETED");
+        assertThat(packageHistory()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("미노출과 조회 실패 동안 기존 상품을 보존하고 다시 노출되면 가격 수집을 재개한다")
+    void restoresVisibleGameAfterHiddenAndUnconfirmedResponses() {
+        // given
+        respondWithItems("""
+            {"item_type":0,"id":301,"success":1,"is_free":false,
+             "best_purchase_option":{"packageid":31},"purchase_options":[{"packageid":31,%s}]}
+            """.formatted(DISCOUNT));
+        respondWithItems("{\"item_type\":0,\"id\":301,\"success\":15,\"visible\":false}");
+        respondWithItems("{\"item_type\":0,\"id\":301,\"success\":15}");
+        respond(301, ZERO);
+        List<Long> ids = List.of(301L);
+        steamStoreCollector.collectPurchaseOptions(ids, SLOT);
+
+        // when
+        steamStoreCollector.collectPurchaseOptions(ids, SLOT.plusSeconds(1));
+        steamStoreCollector.collectPurchaseOptions(ids, SLOT.plusSeconds(2));
+
+        // then
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT store_visibility FROM game WHERE steam_app_id = 301 AND is_free = false
+            """, String.class)).isEqualTo("HIDDEN");
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT count(*) FROM game_purchase_option WHERE deleted_at IS NULL AND is_best_option
+            """, Long.class)).isEqualTo(1L);
+        assertThat(currentPackagePrice()).isEqualTo(1000L);
+        assertThat(packageHistory()).containsExactly(1000L);
+
+        steamStoreCollector.collectPurchaseOptions(ids, SLOT.plusSeconds(3));
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT store_visibility FROM game WHERE steam_app_id = 301", String.class))
+            .isEqualTo("VISIBLE");
+        assertThat(packageHistory()).containsExactly(1000L, 0L);
         mockRestServiceServer.verify();
     }
 

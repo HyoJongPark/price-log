@@ -9,6 +9,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import java.time.Instant;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
+import kr.co.pricelog.domain.game.enums.StoreVisibility;
 import kr.co.pricelog.global.entity.BaseEntity;
 import lombok.Getter;
 import org.hibernate.annotations.SQLRestriction;
@@ -38,6 +39,14 @@ public class Game extends BaseEntity {
 
     @Column(name = "is_free")
     private Boolean freeToPlay;
+
+    @Enumerated(EnumType.STRING)
+    private StoreVisibility storeVisibility;
+
+    /** 한국 상점에서 명시적으로 확인된 노출 상태를 반영한다. */
+    public void updateStoreVisibility(StoreVisibility storeVisibility) {
+        this.storeVisibility = storeVisibility;
+    }
 
     /** 한국 상점 앱 응답의 무료 표기를 반영한다. 필드가 생략되면 미확인으로 둔다. */
     public void updateFreeToPlay(Boolean freeToPlay) {
