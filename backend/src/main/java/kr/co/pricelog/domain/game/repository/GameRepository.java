@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 import kr.co.pricelog.domain.game.entity.Game;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
 import org.springframework.data.jpa.repository.Modifying;
@@ -37,14 +38,31 @@ public interface GameRepository extends Repository<Game, Long> {
                            String[] descriptions, LocalDate[] releaseDates, String[] releaseTexts,
                            Boolean[] comingSoon, String[] koreanSupport);
 
-    /** 같은 앱이 겹치면 목록에서 얻은 필드만 갱신한다. */
+    /** 해당 페이지에서 활성 본편에 이미 연결된 DLC 앱 번호만 조회한다. */
+    @Query("""
+        SELECT dlc.steamAppId FROM Game dlc JOIN Game parent ON parent.id = dlc.parentGameId
+        WHERE dlc.steamAppId IN :ids AND dlc.appType = DLC AND parent.appType = GAME
+            AND parent.steamAppId NOT IN :ids
+        """)
+    Set<Long> findLinkedDlcAppIds(Collection<Long> ids);
+
+    /** 같은 페이지에 DLC로 나타난 앱은 부모 후보에서 제외한다. */
     @Modifying
     @Query(value = """
+        WITH page AS (
+            SELECT * FROM unnest(CAST(:ids AS bigint[]), CAST(:names AS text[]),
+                                 CAST(:parentIds AS bigint[]))
+                WITH ORDINALITY AS input(app_id, app_name, parent_app_id, position)
+        )
         INSERT INTO game AS g
-            (steam_app_id, name, app_type, catalog_updated_at, created_at, updated_at)
-        SELECT DISTINCT ON (app_id) app_id, app_name, :#{#appType.name()}, :now, :now, :now
-        FROM unnest(CAST(:ids AS bigint[]), CAST(:names AS text[]))
-             WITH ORDINALITY AS page(app_id, app_name, position)
+            (steam_app_id, name, app_type, parent_game_id,
+             catalog_updated_at, created_at, updated_at)
+        SELECT DISTINCT ON (app_id) app_id, app_name, :#{#appType.name()},
+            CASE WHEN parent_app_id IS NOT NULL AND parent_app_id NOT IN (SELECT app_id FROM page)
+                 THEN (SELECT p.id FROM game p WHERE p.steam_app_id = page.parent_app_id
+                       AND p.app_type = 'GAME' AND p.deleted_at IS NULL) END,
+            :now, :now, :now
+        FROM page
         ORDER BY app_id, position DESC
         ON CONFLICT (steam_app_id) DO UPDATE SET
             name = EXCLUDED.name,
@@ -54,12 +72,16 @@ public interface GameRepository extends Repository<Game, Long> {
                 THEN array_append(g.search_aliases, g.name)
                 ELSE g.search_aliases END,
             parent_game_id = CASE WHEN EXCLUDED.app_type = 'GAME' THEN NULL
-                                  ELSE g.parent_game_id END,
+                WHEN g.deleted_at IS NULL THEN coalesce(EXCLUDED.parent_game_id, g.parent_game_id)
+                ELSE g.parent_game_id END,
             catalog_updated_at = EXCLUDED.catalog_updated_at,
             updated_at = GREATEST(g.updated_at, EXCLUDED.updated_at)
         WHERE g.catalog_updated_at <= EXCLUDED.catalog_updated_at
-          AND (g.name, g.app_type) IS DISTINCT FROM (EXCLUDED.name, EXCLUDED.app_type)
+          AND ((g.name, g.app_type) IS DISTINCT FROM (EXCLUDED.name, EXCLUDED.app_type)
+            OR (g.deleted_at IS NULL AND EXCLUDED.parent_game_id IS NOT NULL
+                AND g.parent_game_id IS DISTINCT FROM EXCLUDED.parent_game_id))
         """, nativeQuery = true)
     void upsertPage(@Param("ids") Long[] ids, @Param("names") String[] names,
-                    @Param("appType") SteamAppType appType, @Param("now") Instant now);
+                    @Param("parentIds") Long[] parentIds, @Param("appType") SteamAppType appType,
+                    @Param("now") Instant now);
 }

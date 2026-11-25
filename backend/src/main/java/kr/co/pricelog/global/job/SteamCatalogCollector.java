@@ -3,6 +3,7 @@ package kr.co.pricelog.global.job;
 import io.github.resilience4j.retry.annotation.Retry;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.OptionalLong;
 import kr.co.pricelog.domain.collection.service.SteamCatalogCollectionService;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
@@ -19,6 +20,7 @@ public class SteamCatalogCollector {
     private static final int PAGE_SIZE = 10_000;
 
     private final SteamAppListClient steamAppListClient;
+    private final SteamDlcParentCollector steamDlcParentCollector;
     private final SteamCatalogCollectionService steamCatalogCollectionService;
 
     /** 최초 적재가 남아 있을 때만 새 목록을 읽거나 저장한 커서에서 이어간다. */
@@ -41,8 +43,11 @@ public class SteamCatalogCollector {
             while (nextCursor.isPresent()) {
                 SteamAppPage page = steamAppListClient.getPage(type, nextCursor.getAsLong(),
                     PAGE_SIZE);
+                Map<Long, Long> parents = type == SteamAppType.DLC
+                    ? steamDlcParentCollector.findParents(page.appIds())
+                    : Map.of();
                 nextCursor = steamCatalogCollectionService.savePageAndAdvanceCursor(
-                    type, scheduledAt, page, Instant.now());
+                    type, scheduledAt, page, parents, Instant.now());
             }
         } catch (RuntimeException collectionFailure) {
             steamCatalogCollectionService.markFailed(type, scheduledAt);

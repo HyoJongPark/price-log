@@ -154,6 +154,7 @@ class SteamAppChangeCollectorIntegrationTest {
         when(steamAppListClient.getChangedPage(GAME, 10, 10000, since))
             .thenThrow(new RestClientException("중단")).thenReturn(EMPTY);
         when(steamAppListClient.getChangedPage(DLC, 0, 10000, since)).thenReturn(page(20));
+        when(steamStoreClient.getDlcParents(List.of(20L))).thenReturn(Map.of(20L, 10L));
         when(steamStoreClient.getPurchaseOptions(List.of(10L)))
             .thenReturn(Map.of(10L, option(10L)));
 
@@ -173,6 +174,11 @@ class SteamAppChangeCollectorIntegrationTest {
         assertThat(jdbcTemplate.queryForList("SELECT slot_at FROM price_history", Timestamp.class))
             .containsExactly(Timestamp.from(nextHour));
         verify(steamStoreClient, times(2)).getPurchaseOptions(List.of(10L));
+        assertThat(jdbcTemplate.queryForList("""
+            SELECT dlc.steam_app_id FROM game dlc JOIN game parent ON parent.id = dlc.parent_game_id
+            WHERE parent.steam_app_id = 10
+            """, Long.class)).containsExactly(20L);
+        verify(steamStoreClient).getDlcParents(List.of(20L));
         verifyNoMoreInteractions(steamStoreClient);
     }
 
@@ -292,6 +298,7 @@ class SteamAppChangeCollectorIntegrationTest {
         verify(steamStoreClient).getPurchaseOptions(List.of(10L));
         verify(steamStoreClient).getPurchaseOptions(List.of(20L));
         verify(steamStoreClient).getPurchaseOptions(List.of(30L));
+        verify(steamStoreClient).getDlcParents(List.of(40L));
         verifyNoMoreInteractions(steamStoreClient);
         assertThat(jdbcTemplate.queryForList("SELECT slot_at FROM price_history ORDER BY slot_at",
             Timestamp.class)).containsExactly(Timestamp.from(MIDNIGHT), Timestamp.from(nextHour),

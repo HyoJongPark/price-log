@@ -6,6 +6,7 @@ import static kr.co.pricelog.domain.collection.enums.PipelineType.STEAM_GAME_LIS
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import kr.co.pricelog.domain.collection.dto.ExecutionTime;
@@ -62,12 +63,12 @@ public class SteamCatalogCollectionService {
     /** 게임과 마지막 처리 위치를 함께 저장한다. */
     public OptionalLong savePageAndAdvanceCursor(SteamAppType type, Instant scheduledAt,
                                                  SteamAppPage page,
-                                                 Instant observedAt) {
+                                                 Map<Long, Long> parents, Instant observedAt) {
         PipelineExecution execution = pipelineExecutionRepository.findByPipelineTypeAndScheduledAt(
             PipelineType.forSteamList(type), scheduledAt);
         OptionalLong lastAppId = OptionalLong.empty();
         if (!page.apps().isEmpty()) {
-            gameCatalogService.applyPage(type, page.apps(), observedAt);
+            gameCatalogService.applyPage(type, page.apps(), parents, observedAt);
             lastAppId = OptionalLong.of(page.apps().getLast().appId());
         }
 

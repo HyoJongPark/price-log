@@ -12,4 +12,9 @@ public record SteamAppPage(List<SteamApp> apps, OptionalLong nextCursor) {
         apps = List.copyOf(apps);
         Objects.requireNonNull(nextCursor);
     }
+
+    /** 이 페이지의 앱 번호를 목록 순서로 반환한다. */
+    public List<Long> appIds() {
+        return apps.stream().map(SteamApp::appId).toList();
+    }
 }

@@ -340,6 +340,32 @@ class SteamStoreClientTest {
         mockRestServiceServer.verify();
     }
 
+    @Test
+    @DisplayName("DLC 조회는 관계 필드만 요청하고 앱 ID가 일치하는 정상 응답에서 부모를 읽는다")
+    void readsDlcParentIds() {
+        // given
+        List<Long> ids = List.of(660L, 1256L, 1257L, 1258L);
+        mockRestServiceServer.expect(request -> {
+            String query = request.getURI().getQuery().substring("input_json=".length());
+            assertThat(objectMapper.readTree(query).get("data_request"))
+                .isEqualTo(objectMapper.readTree("{\"include_related_items\":true}"));
+        }).andRespond(withSuccess("""
+            {"response":{"store_items":[
+             {"id":1257,"item_type":0,"success":1,"related_items":{"parent_appid":1250}},
+             {"id":660,"item_type":0,"success":15,"visible":false},
+             {"id":1258,"item_type":0,"success":1},
+             {"id":1256,"item_type":0,"success":1,"related_items":{"parent_appid":1250}},
+             {"id":99,"item_type":0,"success":1,"related_items":{"parent_appid":100}}]}}
+            """, MediaType.APPLICATION_JSON));
+
+        // when
+        Map<Long, Long> parents = steamStoreClient.getDlcParents(ids);
+
+        // then
+        assertThat(parents).isEqualTo(Map.of(1256L, 1250L, 1257L, 1250L));
+        mockRestServiceServer.verify();
+    }
+
     private ResponseActions expectAppIds(List<Long> ids) {
         return mockRestServiceServer.expect(request -> {
             String query = request.getURI().getQuery().substring("input_json=".length());

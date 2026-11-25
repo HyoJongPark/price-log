@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import kr.co.pricelog.domain.game.enums.StoreVisibility;
 import kr.co.pricelog.global.client.steam.constants.SteamApiConstants;
@@ -42,6 +43,11 @@ public class SteamStoreClient {
           "include_release":true,"include_supported_languages":true}}
         """;
 
+    private static final String DLC_PARENTS_QUERY = """
+        {"ids":[%s],"context":{"country_code":"KR","language":"koreana"},
+         "data_request":{"include_related_items":true}}
+        """;
+
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
 
@@ -57,58 +63,83 @@ public class SteamStoreClient {
      */
     @Retry(name = "steamRequest")
     public Map<Long, SteamPurchaseOptions> getPurchaseOptions(List<Long> steamAppIds) {
+        return getItems(steamAppIds, PURCHASE_OPTIONS_QUERY, this::readPurchaseOptions);
+    }
+
+    /** 한국 상점에서 확인된 DLC 앱 번호와 부모 앱 번호를 반환한다. */
+    @Retry(name = "steamRequest")
+    public Map<Long, Long> getDlcParents(List<Long> steamAppIds) {
+        return getItems(steamAppIds, DLC_PARENTS_QUERY, SteamStoreClient::readParentAppId);
+    }
+
+    private <T> Map<Long, T> getItems(List<Long> steamAppIds, String query,
+                                      Function<JsonNode, Optional<T>> readItem) {
         if (steamAppIds.isEmpty()) {
             return Map.of();
         }
 
         try {
-            return requestOptions(steamAppIds);
+            return requestItems(steamAppIds, query, readItem);
         } catch (HttpClientErrorException failure) {
             if (failure.getStatusCode() != HttpStatus.URI_TOO_LONG || steamAppIds.size() == 1) {
                 throw failure;
             }
             // 앱 번호의 자릿수에 따라 같은 묶음 크기도 URL 길이 제한을 넘을 수 있다.
             int middle = steamAppIds.size() / 2;
-            Map<Long, SteamPurchaseOptions> confirmed = new LinkedHashMap<>(
-                getPurchaseOptions(steamAppIds.subList(0, middle)));
-            confirmed.putAll(getPurchaseOptions(steamAppIds.subList(middle, steamAppIds.size())));
+            Map<Long, T> confirmed = new LinkedHashMap<>(
+                getItems(steamAppIds.subList(0, middle), query, readItem));
+            confirmed.putAll(getItems(steamAppIds.subList(middle, steamAppIds.size()), query,
+                readItem));
             return Collections.unmodifiableMap(confirmed);
         }
     }
 
-    private Map<Long, SteamPurchaseOptions> requestOptions(List<Long> steamAppIds) {
+    private <T> Map<Long, T> requestItems(List<Long> steamAppIds, String query,
+                                          Function<JsonNode, Optional<T>> readItem) {
         String ids = steamAppIds.stream().map(id -> "{\"appid\":" + id + "}")
             .collect(Collectors.joining(","));
         SteamStoreResponse result = restClient.get()
             .uri("/IStoreBrowseService/GetItems/v1/?input_json={query}",
-                PURCHASE_OPTIONS_QUERY.formatted(ids))
+                query.formatted(ids))
             .retrieve()
             .body(SteamStoreResponse.class);
 
         if (result == null || result.response() == null || result.response().items() == null) {
-            throw new RestClientException("Steam 상점의 구매 옵션 조회 결과가 누락되었습니다");
+            throw new RestClientException("Steam 상점의 앱 조회 결과가 누락되었습니다");
         }
         Map<Long, List<JsonNode>> itemsById = result.response().items().stream()
             .filter(item -> item != null && item.path("id").isIntegralNumber()
                 && item.path("id").canConvertToLong())
             .collect(Collectors.groupingBy(item -> item.get("id").longValue()));
 
-        Map<Long, SteamPurchaseOptions> confirmed = new LinkedHashMap<>();
+        Map<Long, T> confirmed = new LinkedHashMap<>();
         for (long steamAppId : steamAppIds) {
-            readPurchaseOptions(itemsById.get(steamAppId))
-                .ifPresent(options -> confirmed.put(steamAppId, options));
+            List<JsonNode> items = itemsById.get(steamAppId);
+            if (items != null && items.size() == 1) {
+                readItem.apply(items.getFirst())
+                    .ifPresent(value -> confirmed.put(steamAppId, value));
+            }
         }
         return Collections.unmodifiableMap(confirmed);
     }
 
-    private Optional<SteamPurchaseOptions> readPurchaseOptions(List<JsonNode> items) {
-        // TODO: 로깅 도입 시 제외된 앱 ID와 Steam 결과 코드·누락·중복·해석 실패 사유를 기록한다.
-        if (items == null || items.size() != 1) {
+    private static Optional<Long> readParentAppId(JsonNode item) {
+        JsonNode parent = item.path("related_items").path("parent_appid");
+        if (item.path("item_type").asInt(-1) != APP_ITEM_TYPE
+            || item.path("success").asInt() != SUCCESS
+            || !item.path("visible").asBoolean(true)
+            || item.path("unvailable_for_country_restriction").asBoolean()
+            || !parent.isIntegralNumber() || !parent.canConvertToLong()
+            || parent.longValue() <= 0) {
             return Optional.empty();
         }
+        return Optional.of(parent.longValue());
+    }
 
+    private Optional<SteamPurchaseOptions> readPurchaseOptions(JsonNode rawItem) {
+        // TODO: 로깅 도입 시 제외된 앱 ID와 Steam 결과 코드·누락·중복·해석 실패 사유를 기록한다.
         try {
-            SteamStoreItem item = objectMapper.treeToValue(items.getFirst(), SteamStoreItem.class);
+            SteamStoreItem item = objectMapper.treeToValue(rawItem, SteamStoreItem.class);
             return confirmedPurchaseOptions(item);
         } catch (JsonProcessingException | RestClientException ignored) {
             return Optional.empty();

@@ -28,6 +28,8 @@ public class Game extends BaseEntity {
     @Column(nullable = false, unique = true)
     private Long steamAppId;
 
+    private Long parentGameId;
+
     @Column(nullable = false)
     private String name;
 

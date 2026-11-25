@@ -128,7 +128,8 @@ class SteamCollectionSchedulerIntegrationTest {
         when(steamAppListClient.getChangedPage(GAME, 0, 10000, firstWindow))
             .thenReturn(added);
         when(steamAppListClient.getChangedPage(DLC, 0, 10000, firstWindow))
-            .thenReturn(empty);
+            .thenReturn(new SteamAppPage(dlc.apps(), OptionalLong.empty()));
+        when(steamStoreClient.getDlcParents(List.of(20L))).thenReturn(Map.of(20L, 10L));
         Instant lastWindow = resumed.truncatedTo(ChronoUnit.HOURS).minus(1, ChronoUnit.HOURS);
         when(steamAppListClient.getChangedPage(GAME, 0, 10000, lastWindow)).thenReturn(empty);
         when(steamAppListClient.getChangedPage(DLC, 0, 10000, lastWindow)).thenReturn(empty);
@@ -179,6 +180,7 @@ class SteamCollectionSchedulerIntegrationTest {
         verifyNoMoreInteractions(steamAppListClient);
         verify(steamStoreClient, times(2)).getPurchaseOptions(List.of(10L));
         verify(steamStoreClient).getPurchaseOptions(List.of(30L));
+        verify(steamStoreClient).getDlcParents(List.of(20L));
         verifyNoMoreInteractions(steamStoreClient);
     }
 

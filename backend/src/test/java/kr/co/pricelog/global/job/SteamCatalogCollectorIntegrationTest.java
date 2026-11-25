@@ -14,6 +14,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.OptionalLong;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
@@ -23,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.domain.game.service.GameCatalogService;
 import kr.co.pricelog.global.client.steam.SteamAppListClient;
+import kr.co.pricelog.global.client.steam.SteamStoreClient;
 import kr.co.pricelog.global.client.steam.dto.SteamApp;
 import kr.co.pricelog.global.client.steam.dto.SteamAppPage;
 import org.junit.jupiter.api.AfterEach;
@@ -44,7 +46,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
-@SpringBootTest(properties = "resilience4j.retry.instances.steamCollection.wait-duration=1ms")
+@SpringBootTest(properties = {"resilience4j.retry.instances.steamCollection.wait-duration=1ms",
+    "pricelog.collection.daily.batch-size=2"})
 class SteamCatalogCollectorIntegrationTest {
 
     private static final Instant FIRST = Instant.parse("2026-11-20T00:00:00Z");
@@ -70,6 +73,9 @@ class SteamCatalogCollectorIntegrationTest {
     @MockitoBean
     private SteamAppListClient steamAppListClient;
 
+    @MockitoBean
+    private SteamStoreClient steamStoreClient;
+
     @AfterEach
     void clearCatalog() {
         jdbcTemplate.update("DELETE FROM pipeline_execution");
@@ -79,6 +85,53 @@ class SteamCatalogCollectorIntegrationTest {
     @Nested
     @DisplayName("목록 수집과 재실행")
     class Collection {
+
+        @Test
+        @DisplayName("변경 목록에서 기존 부모가 삭제되거나 DLC로 바뀐 자식만 다시 확인한다")
+        void rechecksDlcWithoutAnActiveBaseGame() {
+            // given
+            List<SteamApp> games = List.of(new SteamApp(10, "삭제"), new SteamApp(20, "재분류"),
+                new SteamApp(30, "본편"));
+            List<SteamApp> children = List.of(new SteamApp(11, "A"), new SteamApp(21, "B"),
+                new SteamApp(31, "C"));
+            gameCatalogService.applyPage(GAME, games, FIRST);
+            gameCatalogService.applyPage(DLC, children,
+                Map.of(11L, 10L, 21L, 20L, 31L, 30L), FIRST);
+            jdbcTemplate.update("UPDATE game SET deleted_at = now() WHERE steam_app_id = 10");
+            gameCatalogService.applyPage(DLC, List.of(new SteamApp(20, "재분류")), NEXT);
+
+            // when
+            List<Long> ids = gameCatalogService.findUnlinkedDlcIds(List.of(11L, 21L, 31L));
+
+            // then
+            assertThat(ids).containsExactly(11L, 21L);
+        }
+
+        @Test
+        @DisplayName("같은 DLC 페이지에서 기존 본편이 재분류되면 자식의 부모도 다시 확인한다")
+        void rechecksChildOfReclassifiedParentInSamePage() {
+            // given
+            SteamApp previous = new SteamApp(10, "이전 본편");
+            SteamApp child = new SteamApp(11, "자식 DLC");
+            List<SteamApp> page = List.of(previous, child);
+            gameCatalogService.applyPage(GAME, List.of(previous, new SteamApp(20, "새 본편")), FIRST);
+            gameCatalogService.applyPage(DLC, List.of(child), Map.of(11L, 10L), FIRST);
+
+            // when
+            List<Long> targets = gameCatalogService.findUnlinkedDlcIds(List.of(10L, 11L));
+            gameCatalogService.applyPage(DLC, page, Map.of(10L, 10L, 11L, 20L), NEXT);
+
+            // then
+            assertThat(targets).containsExactly(10L, 11L);
+            assertThat(jdbcTemplate.queryForList("""
+                SELECT dlc.steam_app_id FROM game dlc
+                JOIN game parent ON parent.id = dlc.parent_game_id
+                WHERE parent.steam_app_id = 20
+                """, Long.class)).containsExactly(11L);
+            assertThat(jdbcTemplate.queryForList(
+                "SELECT steam_app_id FROM game WHERE parent_game_id IS NULL ORDER BY steam_app_id",
+                Long.class)).containsExactly(10L, 20L);
+        }
 
         @Test
         @DisplayName("앱 번호와 이름을 종류에 맞게 저장하고 같은 페이지 재생은 갱신하지 않는다")
@@ -220,6 +273,42 @@ class SteamCatalogCollectorIntegrationTest {
     class FullCatalog {
 
         private static final int PAGE_SIZE = 10_000;
+
+        @Test
+        @DisplayName("부모 조회 실패 후 같은 DLC 페이지를 재개해 확인된 본편만 연결한다")
+        void resumesDlcParentLinks() {
+            // given
+            List<SteamApp> dlc = List.of(new SteamApp(660, "비노출"), new SteamApp(1256, "DLC A"),
+                new SteamApp(1257, "DLC B"), new SteamApp(1258, "본편 미등록"));
+            List<Long> firstBatch = List.of(660L, 1256L);
+            List<Long> secondBatch = List.of(1257L, 1258L);
+            when(steamAppListClient.getPage(GAME, 0, PAGE_SIZE)).thenReturn(lastPage(1250, "본편"));
+            when(steamAppListClient.getPage(DLC, 0, PAGE_SIZE))
+                .thenReturn(new SteamAppPage(dlc, OptionalLong.empty()));
+            when(steamStoreClient.getDlcParents(firstBatch)).thenReturn(Map.of(1256L, 1250L));
+            when(steamStoreClient.getDlcParents(secondBatch))
+                .thenThrow(new RestClientException("상점 중단"))
+                .thenReturn(Map.of(1257L, 1250L, 1258L, 9999L));
+
+            // when
+            Throwable failure = catchThrowable(() -> steamCatalogCollector.collectAll(FIRST));
+            final List<Long> afterFailure = appIds();
+            steamCatalogCollector.collectAll(FIRST);
+            steamCatalogCollector.collectAll(FIRST);
+
+            // then
+            assertThat(failure).hasMessage("상점 중단");
+            assertThat(afterFailure).containsExactly(1250L);
+            assertThat(appIds()).containsExactly(660L, 1250L, 1256L, 1257L, 1258L);
+            assertThat(jdbcTemplate.queryForList("""
+                SELECT dlc.steam_app_id FROM game dlc
+                JOIN game parent ON dlc.parent_game_id = parent.id
+                WHERE parent.steam_app_id = 1250 ORDER BY dlc.steam_app_id
+                """, Long.class)).containsExactly(1256L, 1257L);
+            verify(steamAppListClient).getPage(GAME, 0, PAGE_SIZE);
+            verify(steamStoreClient, times(2)).getDlcParents(firstBatch);
+            verify(steamStoreClient, times(2)).getDlcParents(secondBatch);
+        }
 
         @Test
         @DisplayName("기동 중 DLC에서 429가 풀리면 전수 목록의 마지막 커서에서 자동 재개한다")

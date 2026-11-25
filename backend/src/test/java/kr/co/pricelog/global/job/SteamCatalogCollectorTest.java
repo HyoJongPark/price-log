@@ -27,7 +27,8 @@ class SteamCatalogCollectorTest {
     private final SteamCatalogCollectionService steamCatalogCollectionService =
         mock(SteamCatalogCollectionService.class);
     private final SteamCatalogCollector steamCatalogCollector =
-        new SteamCatalogCollector(steamAppListClient, steamCatalogCollectionService);
+        new SteamCatalogCollector(steamAppListClient, mock(SteamDlcParentCollector.class),
+            steamCatalogCollectionService);
 
     @Test
     @DisplayName("회차를 열지 못하면 실패 기록이나 Steam 조회 없이 원인을 전달한다")

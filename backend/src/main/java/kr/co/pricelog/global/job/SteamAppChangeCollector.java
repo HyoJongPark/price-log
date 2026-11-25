@@ -4,6 +4,7 @@ import io.github.resilience4j.retry.annotation.Retry;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Set;
 import kr.co.pricelog.domain.collection.dto.SteamChangeListPlan;
@@ -24,6 +25,7 @@ public class SteamAppChangeCollector {
     private static final int PAGE_SIZE = 10_000;
 
     private final SteamAppListClient steamAppListClient;
+    private final SteamDlcParentCollector steamDlcParentCollector;
     private final GameCatalogService gameCatalogService;
     private final SteamPriceCollectionService steamPriceCollectionService;
     private final SteamStoreCollector steamStoreCollector;
@@ -57,10 +59,15 @@ public class SteamAppChangeCollector {
                 SteamAppPage page = steamAppListClient.getChangedPage(type, cursor.getAsLong(),
                     PAGE_SIZE, modifiedSince);
                 if (!page.apps().isEmpty()) {
-                    gameCatalogService.applyPage(type, page.apps(), Instant.now());
-                }
-                if (type == SteamAppType.GAME) {
-                    page.apps().forEach(app -> gameIds.add(app.appId()));
+                    List<Long> ids = page.appIds();
+                    Map<Long, Long> parents = Map.of();
+                    if (type == SteamAppType.GAME) {
+                        gameIds.addAll(ids);
+                    } else {
+                        parents = steamDlcParentCollector.findParents(
+                            gameCatalogService.findUnlinkedDlcIds(ids));
+                    }
+                    gameCatalogService.applyPage(type, page.apps(), parents, Instant.now());
                 }
                 cursor = page.nextCursor();
             }
