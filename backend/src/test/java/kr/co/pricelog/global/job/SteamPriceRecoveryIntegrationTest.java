@@ -7,20 +7,20 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
-import kr.co.pricelog.domain.collection.service.SteamPriceCollectionService;
 import kr.co.pricelog.domain.game.service.GameCatalogService;
-import kr.co.pricelog.global.client.steam.SteamRequestRetry;
-import kr.co.pricelog.global.client.steam.SteamStoreClient;
+import kr.co.pricelog.global.client.steam.SteamAppListClient;
 import kr.co.pricelog.global.client.steam.dto.SteamApp;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.client.AutoConfigureMockRestServiceServer;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -28,17 +28,20 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.client.ResponseActions;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestClient;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
-@SpringBootTest(properties = "STEAM_WEB_API_KEY=test-key")
+@AutoConfigureMockRestServiceServer
+@SpringBootTest(properties = {"STEAM_WEB_API_KEY=test-key",
+    "resilience4j.retry.instances.steamRequest.wait-duration=1ms",
+    "resilience4j.retry.instances.steamCollection.wait-duration=1ms"})
 class SteamPriceRecoveryIntegrationTest {
 
     private static final Instant SLOT = Instant.parse("2026-01-01T00:00:00Z");
@@ -53,8 +56,8 @@ class SteamPriceRecoveryIntegrationTest {
     @Autowired
     private GameCatalogService gameCatalogService;
 
-    @Autowired
-    private SteamPriceCollectionService steamPriceCollectionService;
+    @MockitoBean
+    private SteamAppListClient steamAppListClient;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -62,16 +65,14 @@ class SteamPriceRecoveryIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
     private MockRestServiceServer server;
+
+    @Autowired
     private SteamStoreCollector steamStoreCollector;
 
     @BeforeEach
     void setUp() {
-        RestClient.Builder builder = RestClient.builder();
-        server = MockRestServiceServer.bindTo(builder).build();
-        steamStoreCollector = new SteamStoreCollector(
-            new SteamStoreClient(builder, objectMapper, new SteamRequestRetry()),
-            steamPriceCollectionService);
         jdbcTemplate.execute("""
             TRUNCATE pipeline_execution, price_history, game_purchase_option, purchase_option, game
             """);
@@ -127,10 +128,57 @@ class SteamPriceRecoveryIntegrationTest {
     @DisplayName("429 재시도를 소진하면 위치를 보존하고 재개 후 같은 묶음에서 429가 풀리면 저장한다")
     void resumesAfterRateLimit() {
         // given
+        List<Long> first = TARGETS.subList(0, 10);
+        List<Long> second = TARGETS.subList(10, 20);
+        respond(first, first);
+        for (int attempt = 0; attempt < 4; attempt++) {
+            expectIds(second).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, "0"));
+        }
+        respond(second, second);
+        List<Long> third = TARGETS.subList(20, 30);
+        respond(third, third);
+
+        // when
+        steamStoreCollector.collectAll(SLOT, 10);
+
+        // then
+        assertProgress("COMPLETED", 30, "{}", 30);
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("414로 나눈 뒷부분이 429이면 원래 묶음부터 재조회하고 가격은 한 번씩 저장한다")
+    void retriesOriginalBatchAfterSplit() {
+        // given
+        List<Long> batch = List.of(1L, 2L);
+        List<Long> first = List.of(1L);
+        List<Long> second = List.of(2L);
+        expectIds(batch).andRespond(withStatus(HttpStatus.URI_TOO_LONG));
+        respond(first, first);
+        expectIds(second).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+        expectIds(batch).andRespond(withStatus(HttpStatus.URI_TOO_LONG));
+        respond(first, first);
+        respond(second, second);
+
+        // when
+        steamStoreCollector.collectPurchaseOptions(batch, SLOT);
+
+        // then
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM price_history",
+            Integer.class)).isEqualTo(batch.size());
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("전수 가격 재시도를 소진해도 다음 기동은 첫 미저장 묶음부터 같은 회차를 완주한다")
+    void stopsAfterFullPriceRetries() {
+        // given
         List<Long> first = TARGETS.subList(0, 15);
         List<Long> second = TARGETS.subList(15, 30);
         respond(first, first);
-        for (int attempt = 0; attempt < 4; attempt++) {
+        // 최초 회차와 세 번의 재개에서 같은 미저장 배치를 각각 최대 네 번 요청한다.
+        for (int attempt = 0; attempt < 16; attempt++) {
             expectIds(second).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER, "0"));
         }
@@ -142,8 +190,10 @@ class SteamPriceRecoveryIntegrationTest {
         // then
         assertThat(failure).isInstanceOf(HttpClientErrorException.TooManyRequests.class);
         assertProgress("FAILED", 15, "{}", 15);
-        steamStoreCollector.collectAll(SLOT, 15);
+        steamStoreCollector.collectAll(SLOT.plusSeconds(12 * 3600), 15);
         assertProgress("COMPLETED", 30, "{}", 30);
+        assertThat(jdbcTemplate.queryForList("SELECT scheduled_at FROM pipeline_execution",
+            Timestamp.class)).containsExactly(Timestamp.from(SLOT));
         server.verify();
     }
 

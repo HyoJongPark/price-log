@@ -1,5 +1,6 @@
 package kr.co.pricelog.global.job;
 
+import io.github.resilience4j.retry.annotation.Retry;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -28,6 +29,7 @@ public class SteamAppChangeCollector {
     private final SteamStoreCollector steamStoreCollector;
 
     /** 목록 완주 전 실패는 시간 구간을 다시 읽고, 이후 실패는 확정된 가격 대상으로 재개한다. */
+    @Retry(name = "steamCollection")
     public void collect(Instant slotAt, int batchSize) {
         Assert.isTrue(batchSize > 0, "가격 수집 묶음 크기는 양수여야 합니다");
         SteamChangeListPlan changeList = steamPriceCollectionService.startChangeList(slotAt);

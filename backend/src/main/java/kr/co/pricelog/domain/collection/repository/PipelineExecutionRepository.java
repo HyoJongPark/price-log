@@ -41,8 +41,13 @@ public interface PipelineExecutionRepository extends Repository<PipelineExecutio
         findFirstByPipelineTypeAndTargetIdsNotNullAndScheduledAtBeforeOrderByScheduledAtDesc(
             PipelineType pipelineType, Instant slotAt);
 
-    /** 현재 회차를 연 뒤 조회하므로 최초 시도 시각은 항상 존재한다. */
-    ExecutionTime findFirstByPipelineTypeOrderByScheduledAtAsc(PipelineType pipelineType);
+    /** 최초 적재가 중단됐을 때 이어갈 회차를 찾는다. */
+    Optional<ExecutionTime> findFirstByPipelineTypeOrderByScheduledAtDesc(
+        PipelineType pipelineType);
+
+    /** 해당 상태의 첫 회차 예정 시각을 찾는다. 첫 변경 조회는 최초 전수 완주 회차부터 따라잡는다. */
+    Optional<ExecutionTime> findFirstByPipelineTypeAndStatusOrderByScheduledAtAsc(
+        PipelineType pipelineType, PipelineExecutionStatus status);
 
     /** 직전 목록의 실패·미처리 ID를 DB 안에서 합쳐 활성 본편만 앱 번호순으로 확정한다. */
     @Modifying

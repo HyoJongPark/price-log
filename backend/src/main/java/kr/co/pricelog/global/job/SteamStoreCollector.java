@@ -1,5 +1,6 @@
 package kr.co.pricelog.global.job;
 
+import io.github.resilience4j.retry.annotation.Retry;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -33,9 +34,10 @@ public class SteamStoreCollector {
     }
 
     /** 고정된 본편 목록을 모두 조회하고 회차 말미에 미해결 앱을 한 번씩 다시 확인한다. */
-    public void collectAll(Instant slotAt, int batchSize) {
+    @Retry(name = "steamCollection")
+    public void collectAll(Instant now, int batchSize) {
         Assert.isTrue(batchSize > 0, "가격 수집 묶음 크기는 양수여야 합니다");
-        steamPriceCollectionService.openFullCollection(slotAt)
+        steamPriceCollectionService.openFullCollection(now)
             .ifPresent(plan -> collectPrices(plan, batchSize));
     }
 

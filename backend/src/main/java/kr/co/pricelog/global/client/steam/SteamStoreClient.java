@@ -3,6 +3,7 @@ package kr.co.pricelog.global.client.steam;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.resilience4j.retry.annotation.Retry;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -35,15 +36,11 @@ public class SteamStoreClient {
         """;
 
     private final RestClient restClient;
-    private final SteamRequestRetry steamRequestRetry;
-
     private final ObjectMapper objectMapper;
 
     /** 공개 상점 API에 연결한다. */
-    public SteamStoreClient(RestClient.Builder restClientBuilder, ObjectMapper objectMapper,
-                            SteamRequestRetry steamRequestRetry) {
+    public SteamStoreClient(RestClient.Builder restClientBuilder, ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
-        this.steamRequestRetry = steamRequestRetry;
         this.restClient = restClientBuilder.baseUrl(SteamApiConstants.BASE_URL).build();
     }
 
@@ -51,6 +48,7 @@ public class SteamStoreClient {
      * 한국 상점에서 구매 옵션 또는 미노출 상태를 확인한 앱을 요청 순서대로 반환한다.
      * 입력은 카탈로그의 game.steam_app_id에서 읽으며, DB 제약이 ID 범위와 고유성을 보장한다.
      */
+    @Retry(name = "steamRequest")
     public Map<Long, SteamPurchaseOptions> getPurchaseOptions(List<Long> steamAppIds) {
         if (steamAppIds.isEmpty()) {
             return Map.of();
@@ -74,11 +72,11 @@ public class SteamStoreClient {
     private Map<Long, SteamPurchaseOptions> requestOptions(List<Long> steamAppIds) {
         String ids = steamAppIds.stream().map(id -> "{\"appid\":" + id + "}")
             .collect(Collectors.joining(","));
-        SteamStoreResponse result = steamRequestRetry.execute(() -> restClient.get()
+        SteamStoreResponse result = restClient.get()
             .uri("/IStoreBrowseService/GetItems/v1/?input_json={query}",
                 PURCHASE_OPTIONS_QUERY.formatted(ids))
             .retrieve()
-            .body(SteamStoreResponse.class));
+            .body(SteamStoreResponse.class);
 
         if (result == null || result.response() == null || result.response().items() == null) {
             throw new RestClientException("Steam 상점의 구매 옵션 조회 결과가 누락되었습니다");

@@ -3,6 +3,10 @@ spring:
     import: "optional:file:./.env[.properties]"
   application:
     name: price-log
+  http:
+    client:
+      connect-timeout: 5s
+      read-timeout: 30s
   jpa:
     open-in-view: false
     hibernate:
@@ -17,3 +21,22 @@ pricelog:
     daily:
       enabled: true
       batch-size: 260
+
+resilience4j:
+  retry:
+    configs:
+      steam:
+        retry-exceptions:
+          - org.springframework.web.client.HttpClientErrorException$TooManyRequests
+    instances:
+      steamRequest:
+        base-config: steam
+        max-attempts: 4
+        wait-duration: 15s
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        exponential-max-wait-duration: 45s
+      steamCollection:
+        base-config: steam
+        max-attempts: 4
+        wait-duration: 5m

@@ -12,3 +12,4 @@
 /backend/bin/
 /frontend/node_modules/
 /frontend/dist/
+.vscode/settings.json

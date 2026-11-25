@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import java.net.http.HttpTimeoutException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -32,15 +33,19 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
-@SpringBootTest(properties = "STEAM_WEB_API_KEY=test-key")
+@SpringBootTest(properties = {"STEAM_WEB_API_KEY=test-key",
+    "resilience4j.retry.instances.steamCollection.wait-duration=1ms"})
 class SteamAppChangeCollectorIntegrationTest {
 
     @Container
@@ -64,19 +69,85 @@ class SteamAppChangeCollectorIntegrationTest {
     private JdbcTemplate jdbcTemplate;
 
     private static final Instant MIDNIGHT = Instant.parse("2026-11-23T15:00:00Z");
+    private static final Instant CATALOG_START = MIDNIGHT.minus(2, ChronoUnit.DAYS);
     private static final SteamAppPage EMPTY = new SteamAppPage(List.of(), OptionalLong.empty());
 
     @BeforeEach
     void resetDatabase() {
         jdbcTemplate.execute("TRUNCATE pipeline_execution, purchase_option, game CASCADE");
+        jdbcTemplate.update("""
+            INSERT INTO pipeline_execution
+                (pipeline, scheduled_at, status, finished_at, created_at, updated_at)
+            VALUES ('STEAM_DLC_LIST', ?, 'COMPLETED', now(), now(), now())
+            """, Timestamp.from(CATALOG_START));
+    }
+
+    @Test
+    @DisplayName("전수 이력이 여러 개인 DB의 첫 변경 조회는 가장 이른 완주 회차부터 따라잡는다")
+    void catchesUpFromEarliestCompletedCatalog() {
+        // given
+        jdbcTemplate.update("""
+            INSERT INTO pipeline_execution
+                (pipeline, scheduled_at, status, finished_at, created_at, updated_at)
+            VALUES ('STEAM_DLC_LIST', ?, 'FAILED', now(), now(), now()),
+                   ('STEAM_DLC_LIST', ?, 'COMPLETED', now(), now(), now())
+            """, Timestamp.from(CATALOG_START.minus(1, ChronoUnit.DAYS)),
+            Timestamp.from(CATALOG_START.plus(1, ChronoUnit.DAYS)));
+        Instant firstWindow = CATALOG_START.minus(1, ChronoUnit.HOURS);
+        Instant nextWindow = MIDNIGHT.minus(1, ChronoUnit.HOURS);
+        when(steamAppListClient.getChangedPage(GAME, 0, 10000, firstWindow)).thenReturn(page(70));
+        when(steamAppListClient.getChangedPage(DLC, 0, 10000, firstWindow)).thenReturn(EMPTY);
+        when(steamAppListClient.getChangedPage(GAME, 0, 10000, nextWindow)).thenReturn(EMPTY);
+        when(steamAppListClient.getChangedPage(DLC, 0, 10000, nextWindow)).thenReturn(EMPTY);
+        when(steamStoreClient.getPurchaseOptions(List.of(70L)))
+            .thenReturn(Map.of(70L, option(70L)));
+
+        // when
+        steamAppChangeCollector.collect(MIDNIGHT, 260);
+        steamAppChangeCollector.collect(MIDNIGHT.plus(1, ChronoUnit.HOURS), 260);
+
+        // then
+        assertThat(jdbcTemplate.queryForList("SELECT slot_at FROM price_history", Timestamp.class))
+            .containsExactly(Timestamp.from(MIDNIGHT));
+        verify(steamAppListClient).getChangedPage(GAME, 0, 10000, nextWindow);
+        verify(steamAppListClient).getChangedPage(DLC, 0, 10000, nextWindow);
+    }
+
+    @Test
+    @DisplayName("같은 변경 회차에서 목록 429는 구간을 다시 읽고 가격 429는 미저장 묶음부터 재개한다")
+    void retriesChangeDiscoveryAndPriceBatches() {
+        // given
+        Instant since = CATALOG_START.minus(1, ChronoUnit.HOURS);
+        HttpClientErrorException rateLimit = HttpClientErrorException.create(
+            HttpStatus.TOO_MANY_REQUESTS, "Too Many Requests", null, null, null);
+        when(steamAppListClient.getChangedPage(GAME, 0, 10000, since)).thenReturn(page(10, 20));
+        when(steamAppListClient.getChangedPage(DLC, 0, 10000, since))
+            .thenThrow(rateLimit).thenReturn(EMPTY);
+        when(steamStoreClient.getPurchaseOptions(List.of(10L)))
+            .thenReturn(Map.of(10L, option(10L)));
+        when(steamStoreClient.getPurchaseOptions(List.of(20L)))
+            .thenThrow(rateLimit).thenReturn(Map.of(20L, option(20L)));
+
+        // when
+        steamAppChangeCollector.collect(MIDNIGHT, 1);
+
+        // then
+        verify(steamAppListClient, times(2)).getChangedPage(GAME, 0, 10000, since);
+        verify(steamAppListClient, times(2)).getChangedPage(DLC, 0, 10000, since);
+        verify(steamStoreClient).getPurchaseOptions(List.of(10L));
+        verify(steamStoreClient, times(2)).getPurchaseOptions(List.of(20L));
+        verifyNoMoreInteractions(steamAppListClient, steamStoreClient);
+        assertThat(status(MIDNIGHT)).isEqualTo("COMPLETED");
+        assertThat(jdbcTemplate.queryForList("SELECT slot_at FROM price_history", Timestamp.class))
+            .containsExactly(Timestamp.from(MIDNIGHT), Timestamp.from(MIDNIGHT));
     }
 
     @Test
     @DisplayName("첫 조회가 실패해도 다음 회차는 이전 구간부터 다시 읽고 새 본편만 가격을 확인한다")
     void retriesListWindowAndSharesHistoryWithFullCollection() {
         // given
-        Instant since = MIDNIGHT.minus(6, ChronoUnit.HOURS).minusSeconds(1);
-        final Instant six = MIDNIGHT.plus(6, ChronoUnit.HOURS);
+        Instant since = CATALOG_START.minus(1, ChronoUnit.HOURS);
+        final Instant nextHour = MIDNIGHT.plus(1, ChronoUnit.HOURS);
         SteamAppPage first = new SteamAppPage(List.of(new SteamApp(10, "게임")), OptionalLong.of(10));
         when(steamAppListClient.getChangedPage(GAME, 0, 10000, since)).thenReturn(first);
         when(steamAppListClient.getChangedPage(GAME, 10, 10000, since))
@@ -88,18 +159,18 @@ class SteamAppChangeCollectorIntegrationTest {
         // when
         final Throwable failure =
             catchThrowable(() -> steamAppChangeCollector.collect(MIDNIGHT, 260));
-        steamAppChangeCollector.collect(six, 260);
-        steamAppChangeCollector.collect(six, 260);
-        steamStoreCollector.collectAll(six, 260);
+        steamAppChangeCollector.collect(nextHour, 260);
+        steamAppChangeCollector.collect(nextHour, 260);
+        steamStoreCollector.collectAll(nextHour, 260);
 
         // then
         assertThat(failure).hasMessage("중단");
         assertThat(status(MIDNIGHT)).isEqualTo("FAILED");
-        assertThat(status(six)).isEqualTo("COMPLETED");
+        assertThat(status(nextHour)).isEqualTo("COMPLETED");
         assertThat(jdbcTemplate.queryForList("SELECT app_type FROM game ORDER BY steam_app_id",
             String.class)).containsExactly("GAME", "DLC");
         assertThat(jdbcTemplate.queryForList("SELECT slot_at FROM price_history", Timestamp.class))
-            .containsExactly(Timestamp.from(six));
+            .containsExactly(Timestamp.from(nextHour));
         verify(steamStoreClient, times(2)).getPurchaseOptions(List.of(10L));
         verifyNoMoreInteractions(steamStoreClient);
     }
@@ -144,7 +215,7 @@ class SteamAppChangeCollectorIntegrationTest {
     @DisplayName("변경분 가격 수집을 같은 회차로 재개하면 실패한 묶음부터 이어서 저장한다")
     void resumesChangedPricesFromLastCommittedBatch() {
         // given
-        Instant since = MIDNIGHT.minus(6, ChronoUnit.HOURS).minusSeconds(1);
+        Instant since = CATALOG_START.minus(1, ChronoUnit.HOURS);
         when(steamAppListClient.getChangedPage(GAME, 0, 10000, since)).thenReturn(page(10, 20));
         when(steamAppListClient.getChangedPage(DLC, 0, 10000, since)).thenReturn(EMPTY);
         when(steamStoreClient.getPurchaseOptions(List.of(10L)))
@@ -152,7 +223,8 @@ class SteamAppChangeCollectorIntegrationTest {
         when(steamStoreClient.getPurchaseOptions(List.of(20L)))
             .thenThrow(new RestClientException("상점 중단")).thenReturn(Map.of(20L, option(20L)));
 
-        Throwable failure = catchThrowable(() -> steamAppChangeCollector.collect(MIDNIGHT, 1));
+        Throwable failure =
+            catchThrowable(() -> steamAppChangeCollector.collect(MIDNIGHT, 1));
         assertThat(failure).isInstanceOf(RestClientException.class).hasMessage("상점 중단");
         Timestamp slot = Timestamp.from(MIDNIGHT);
         String execution = """
@@ -188,7 +260,7 @@ class SteamAppChangeCollectorIntegrationTest {
     @DisplayName("목록 완주 후 상점이 중단되면 다음 회차는 미확인 앱과 아직 요청하지 못한 앱을 이어받는다")
     void carriesPendingPricesAndAdvancesDiscoveryIndependently() {
         // given
-        final Instant six = MIDNIGHT.plus(6, ChronoUnit.HOURS);
+        final Instant nextHour = MIDNIGHT.plus(1, ChronoUnit.HOURS);
         when(steamAppListClient.getChangedPage(eq(GAME), eq(0L), eq(10000), any()))
             .thenReturn(page(10, 20, 30, 35, 40, 50), page(15, 30));
         when(steamAppListClient.getChangedPage(eq(DLC), eq(0L), eq(10000), any()))
@@ -206,49 +278,57 @@ class SteamAppChangeCollectorIntegrationTest {
         final Throwable failure =
             catchThrowable(() -> steamAppChangeCollector.collect(MIDNIGHT, 1));
         jdbcTemplate.update("UPDATE game SET deleted_at = ? WHERE steam_app_id = 50",
-            Timestamp.from(six));
-        steamAppChangeCollector.collect(six, 260);
+            Timestamp.from(nextHour));
+        steamAppChangeCollector.collect(nextHour, 260);
 
         // then
         assertThat(failure).hasMessage("상점 중단");
         assertThat(status(MIDNIGHT)).isEqualTo("FAILED");
-        assertThat(status(six)).isEqualTo("COMPLETED");
-        verify(steamAppListClient).getChangedPage(GAME, 0, 10000, MIDNIGHT.minusSeconds(1));
+        assertThat(status(nextHour)).isEqualTo("COMPLETED");
+        verify(steamAppListClient).getChangedPage(GAME, 0, 10000,
+            MIDNIGHT.minus(1, ChronoUnit.HOURS));
         verify(steamStoreClient).getPurchaseOptions(List.of(15L, 20L, 30L, 35L));
         verify(steamStoreClient).getPurchaseOptions(List.of(10L));
         verify(steamStoreClient).getPurchaseOptions(List.of(20L));
         verify(steamStoreClient).getPurchaseOptions(List.of(30L));
         verifyNoMoreInteractions(steamStoreClient);
         assertThat(jdbcTemplate.queryForList("SELECT slot_at FROM price_history ORDER BY slot_at",
-            Timestamp.class)).containsExactly(Timestamp.from(MIDNIGHT), Timestamp.from(six),
-            Timestamp.from(six), Timestamp.from(six), Timestamp.from(six));
+            Timestamp.class)).containsExactly(Timestamp.from(MIDNIGHT), Timestamp.from(nextHour),
+            Timestamp.from(nextHour), Timestamp.from(nextHour), Timestamp.from(nextHour));
     }
 
     @Test
-    @DisplayName("06시 목록 실패 후 12시는 마지막 완주인 00시 경계부터 빈 목록까지 확인한다")
+    @DisplayName("01시 목록 실패 후 이틀 뒤에도 마지막 완주 시각보다 한 시간 전부터 다시 읽는다")
     void readsFromLastCompletedListAfterMissedSlot() {
         // given
-        final Instant six = MIDNIGHT.plus(6, ChronoUnit.HOURS);
-        final Instant noon = MIDNIGHT.plus(12, ChronoUnit.HOURS);
-        Instant boundary = MIDNIGHT.minusSeconds(1);
+        final Instant nextHour = MIDNIGHT.plus(1, ChronoUnit.HOURS);
+        final Instant afterDowntime = MIDNIGHT.plus(2, ChronoUnit.DAYS);
+        Instant boundary = MIDNIGHT.minus(1, ChronoUnit.HOURS);
         when(steamAppListClient.getChangedPage(eq(GAME), eq(0L), eq(10000), any()))
             .thenReturn(EMPTY);
         when(steamAppListClient.getChangedPage(eq(DLC), eq(0L), eq(10000), any()))
             .thenReturn(EMPTY);
+        HttpTimeoutException timeout = new HttpTimeoutException("timeout");
         when(steamAppListClient.getChangedPage(GAME, 0, 10000, boundary))
-            .thenThrow(new RestClientException("목록 중단")).thenReturn(EMPTY);
+            .thenThrow(new ResourceAccessException("Steam 응답 대기 만료", timeout))
+            .thenReturn(page(70));
+        when(steamStoreClient.getPurchaseOptions(List.of(70L)))
+            .thenReturn(Map.of(70L, option(70L)));
 
         // when
         steamAppChangeCollector.collect(MIDNIGHT, 260);
-        Throwable failure = catchThrowable(() -> steamAppChangeCollector.collect(six, 260));
-        steamAppChangeCollector.collect(noon, 260);
+        Throwable failure = catchThrowable(() -> steamAppChangeCollector.collect(nextHour, 260));
+        steamAppChangeCollector.collect(afterDowntime, 260);
 
         // then
-        assertThat(failure).hasMessage("목록 중단");
+        assertThat(failure).isInstanceOf(ResourceAccessException.class)
+            .hasCauseInstanceOf(HttpTimeoutException.class);
         verify(steamAppListClient, times(2)).getChangedPage(GAME, 0, 10000, boundary);
-        assertThat(status(six)).isEqualTo("FAILED");
-        assertThat(status(noon)).isEqualTo("COMPLETED");
-        verifyNoMoreInteractions(steamStoreClient);
+        assertThat(status(nextHour)).isEqualTo("FAILED");
+        assertThat(status(afterDowntime)).isEqualTo("COMPLETED");
+        verify(steamStoreClient).getPurchaseOptions(List.of(70L));
+        assertThat(jdbcTemplate.queryForList("SELECT slot_at FROM price_history", Timestamp.class))
+            .containsExactly(Timestamp.from(afterDowntime));
     }
 
     private SteamAppPage page(long... ids) {

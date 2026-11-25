@@ -34,7 +34,7 @@ class SteamAppListClientTest {
     private final MockRestServiceServer mockRestServiceServer =
         MockRestServiceServer.bindTo(restClientBuilder).build();
     private final SteamAppListClient steamAppListClient =
-        new SteamAppListClient(restClientBuilder, new SteamRequestRetry(), "test-key");
+        new SteamAppListClient(restClientBuilder, "test-key");
 
     @Nested
     @DisplayName("종류별 목록과 페이지 경계")
@@ -170,7 +170,7 @@ class SteamAppListClientTest {
 
             // when
             Throwable failure = catchThrowable(
-                () -> new SteamAppListClient(builder, new SteamRequestRetry(), blankKey));
+                () -> new SteamAppListClient(builder, blankKey));
 
             // then
             assertThat(failure).isInstanceOf(IllegalArgumentException.class)

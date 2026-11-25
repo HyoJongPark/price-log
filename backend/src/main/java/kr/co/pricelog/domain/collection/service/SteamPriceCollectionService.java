@@ -3,10 +3,11 @@ package kr.co.pricelog.domain.collection.service;
 import static kr.co.pricelog.domain.collection.enums.PipelineExecutionStatus.COMPLETED;
 import static kr.co.pricelog.domain.collection.enums.PipelineExecutionStatus.FAILED;
 import static kr.co.pricelog.domain.collection.enums.PipelineType.STEAM_CHANGED_APPS;
+import static kr.co.pricelog.domain.collection.enums.PipelineType.STEAM_DLC_LIST;
 import static kr.co.pricelog.domain.collection.enums.PipelineType.STEAM_PRICE;
 
-import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
@@ -28,12 +29,10 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class SteamPriceCollectionService {
 
-    private static final Duration FIRST_CHANGE_WINDOW = Duration.ofHours(6);
-
     private final PipelineExecutionRepository pipelineExecutionRepository;
     private final GamePurchaseOptionService gamePurchaseOptionService;
 
-    /** 대상이 확정된 회차는 목록 재요청을 건너뛴다. 초 단위 경계의 변경을 한 번 겹쳐 읽는다. */
+    /** 대상이 확정된 회차는 목록 재요청을 건너뛴다. 마지막 목록 회차보다 한 시간 앞에서부터 다시 읽는다. */
     public SteamChangeListPlan startChangeList(Instant slotAt) {
         pipelineExecutionRepository.openIfAbsent(STEAM_CHANGED_APPS, slotAt);
         PipelineExecution execution = pipelineExecutionRepository.findByPipelineTypeAndScheduledAt(
@@ -46,11 +45,12 @@ public class SteamPriceCollectionService {
         Instant start = pipelineExecutionRepository
             .findFirstByPipelineTypeAndTargetIdsNotNullAndScheduledAtBeforeOrderByScheduledAtDesc(
                 STEAM_CHANGED_APPS, slotAt)
-            .map(ExecutionTime::scheduledAt)
-            .orElseGet(() -> pipelineExecutionRepository
-                .findFirstByPipelineTypeOrderByScheduledAtAsc(STEAM_CHANGED_APPS)
-                .scheduledAt().minus(FIRST_CHANGE_WINDOW));
-        return new SteamChangeListPlan(execution.getId(), Optional.of(start.minusSeconds(1)));
+            .or(() -> pipelineExecutionRepository
+                .findFirstByPipelineTypeAndStatusOrderByScheduledAtAsc(STEAM_DLC_LIST, COMPLETED))
+            .orElseThrow().scheduledAt();
+
+        Instant modifiedSince = start.minus(1, ChronoUnit.HOURS);
+        return new SteamChangeListPlan(execution.getId(), Optional.of(modifiedSince));
     }
 
     /** 모든 변경 목록 페이지가 성공한 뒤에만 상점 조회 대상을 확정한다. */
@@ -60,7 +60,15 @@ public class SteamPriceCollectionService {
     }
 
     /** 처음 실행하면 본편 목록을 고정하고 재실행하면 DB의 마지막 커밋을 읽는다. */
-    public Optional<SteamPriceCollectionPlan> openFullCollection(Instant slotAt) {
+    public Optional<SteamPriceCollectionPlan> openFullCollection(Instant now) {
+        if (pipelineExecutionRepository.findFirstByPipelineTypeAndStatusOrderByScheduledAtAsc(
+            STEAM_PRICE, COMPLETED).isPresent()) {
+            return Optional.empty();
+        }
+
+        Instant slotAt = pipelineExecutionRepository.findFirstByPipelineTypeOrderByScheduledAtDesc(
+            STEAM_PRICE).map(ExecutionTime::scheduledAt)
+            .orElse(now);
         pipelineExecutionRepository.openPriceCollection(slotAt);
         return pipelineExecutionRepository.findByPipelineTypeAndScheduledAt(STEAM_PRICE, slotAt)
             .resumePriceCollection();

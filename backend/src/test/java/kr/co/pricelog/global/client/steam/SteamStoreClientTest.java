@@ -36,7 +36,7 @@ class SteamStoreClientTest {
         MockRestServiceServer.bindTo(restClientBuilder).build();
     private final ObjectMapper objectMapper = Jackson2ObjectMapperBuilder.json().build();
     private final SteamStoreClient steamStoreClient = new SteamStoreClient(restClientBuilder,
-        objectMapper, new SteamRequestRetry());
+        objectMapper);
 
     @Nested
     @DisplayName("한국 상점의 본편 구매 옵션 조회")

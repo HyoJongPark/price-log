@@ -33,16 +33,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-@SpringBootTest
 @Testcontainers
+@SpringBootTest(properties = "resilience4j.retry.instances.steamCollection.wait-duration=1ms")
 class SteamCatalogCollectorIntegrationTest {
 
     private static final Instant FIRST = Instant.parse("2026-11-20T00:00:00Z");
@@ -218,6 +220,29 @@ class SteamCatalogCollectorIntegrationTest {
     class FullCatalog {
 
         private static final int PAGE_SIZE = 10_000;
+
+        @Test
+        @DisplayName("기동 중 DLC에서 429가 풀리면 전수 목록의 마지막 커서에서 자동 재개한다")
+        void retriesInitializationFromDlcCursor() {
+            // given
+            when(steamAppListClient.getPage(GAME, 0, PAGE_SIZE)).thenReturn(lastPage(10, "본편"));
+            when(steamAppListClient.getPage(DLC, 0, PAGE_SIZE)).thenReturn(morePages(20));
+            when(steamAppListClient.getPage(DLC, 20, PAGE_SIZE))
+                .thenThrow(HttpClientErrorException.create(
+                    HttpStatus.TOO_MANY_REQUESTS, "Too Many Requests", null, null, null))
+                .thenReturn(lastPage(30, "DLC"));
+
+            // when
+            steamCatalogCollector.initialize(FIRST);
+
+            // then
+            verify(steamAppListClient).getPage(GAME, 0, PAGE_SIZE);
+            verify(steamAppListClient).getPage(DLC, 0, PAGE_SIZE);
+            verify(steamAppListClient, times(2)).getPage(DLC, 20, PAGE_SIZE);
+            verifyNoMoreInteractions(steamAppListClient);
+            assertThat(runStates()).containsExactly("STEAM_DLC_LIST/COMPLETED/30",
+                "STEAM_GAME_LIST/COMPLETED/10");
+        }
 
         @Test
         @DisplayName("본편 완료 후 DLC 조회가 끊기면 커밋된 DLC 커서부터 다시 읽는다")

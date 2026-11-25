@@ -1,5 +1,6 @@
 package kr.co.pricelog.global.job;
 
+import io.github.resilience4j.retry.annotation.Retry;
 import java.time.Instant;
 import java.util.List;
 import java.util.OptionalLong;
@@ -19,6 +20,12 @@ public class SteamCatalogCollector {
 
     private final SteamAppListClient steamAppListClient;
     private final SteamCatalogCollectionService steamCatalogCollectionService;
+
+    /** 최초 적재가 남아 있을 때만 새 목록을 읽거나 저장한 커서에서 이어간다. */
+    @Retry(name = "steamCollection")
+    public void initialize(Instant now) {
+        steamCatalogCollectionService.pendingCatalogSlot(now).ifPresent(this::collectAll);
+    }
 
     /** 같은 예정 시각으로 재호출하면 각 목록의 마지막 커밋 다음부터 수집한다. */
     public void collectAll(Instant scheduledAt) {
