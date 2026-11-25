@@ -3,6 +3,7 @@ package kr.co.pricelog.global.job;
 import static kr.co.pricelog.domain.game.enums.SteamAppType.DLC;
 import static kr.co.pricelog.domain.game.enums.SteamAppType.GAME;
 import static kr.co.pricelog.global.client.steam.enums.SteamPurchaseOptionType.PACKAGE;
+import static kr.co.pricelog.global.job.SteamPurchaseOptionsFixture.visiblePurchaseOptions;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.Mockito.times;
@@ -25,7 +26,6 @@ import kr.co.pricelog.global.client.steam.dto.SteamApp;
 import kr.co.pricelog.global.client.steam.dto.SteamAppPage;
 import kr.co.pricelog.global.client.steam.dto.SteamPrice;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOption;
-import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Answers;
@@ -135,15 +135,15 @@ class SteamCollectionSchedulerIntegrationTest {
         SteamPurchaseOption option = new SteamPurchaseOption(PACKAGE, 40, "기본판",
             new SteamPrice(1000, null, null));
         when(steamStoreClient.getPurchaseOptions(List.of(30L))).thenReturn(
-            Map.of(30L, new SteamPurchaseOptions(List.of(option), option, false)));
+            Map.of(30L, visiblePurchaseOptions(List.of(option), option, false)));
 
         SteamPurchaseOption base = new SteamPurchaseOption(PACKAGE, 50, "본편",
             new SteamPrice(2000, null, null));
         SteamPurchaseOption discounted = new SteamPurchaseOption(PACKAGE, 50, "본편",
             new SteamPrice(1500, 2000L, null));
         when(steamStoreClient.getPurchaseOptions(List.of(10L)))
-            .thenReturn(Map.of(10L, new SteamPurchaseOptions(List.of(base), base, false)))
-            .thenReturn(Map.of(10L, new SteamPurchaseOptions(List.of(discounted), discounted,
+            .thenReturn(Map.of(10L, visiblePurchaseOptions(List.of(base), base, false)))
+            .thenReturn(Map.of(10L, visiblePurchaseOptions(List.of(discounted), discounted,
                 false)));
 
         // when

@@ -85,6 +85,28 @@ class SteamStoreClientTest {
                 new SteamPurchaseOption(PACKAGE, 201, "추가 상품", null));
         }
 
+        @ParameterizedTest
+        @ValueSource(strings = {"{}", "{\"header\":\"header.jpg\"}",
+            "{\"asset_url_format\":\"steam/apps/101/${FILENAME}\"}",
+            "{\"asset_url_format\":\"steam/apps/101/\",\"header\":\"header.jpg\"}"})
+        @DisplayName("헤더 파일명이나 경로 형식이 불완전해도 구매 옵션을 읽는다")
+        void readsOptionsWithoutUsableHeader(String assets) {
+            // given
+            respondWithItems("""
+                [{"item_type":0,"id":101,"success":1,"assets":%s,
+                  "purchase_options":[{"packageid":42}]}]
+                """.formatted(assets));
+
+            // when
+            SteamPurchaseOptions options = steamStoreClient.getPurchaseOptions(List.of(101L))
+                .get(101L);
+
+            // then
+            assertThat(options.imageUrl()).isNull();
+            assertThat(options.purchaseOptions()).extracting(SteamPurchaseOption::steamId)
+                .containsExactly(42L);
+        }
+
         @Test
         @DisplayName("동일한 숫자 ID의 패키지와 번들 중 Steam이 지정한 번들을 목록에서 찾는다")
         void readsKoreanPurchaseOptions() {
@@ -108,7 +130,8 @@ class SteamStoreClientTest {
                 assertThat(objectMapper.readTree(query.substring("input_json=".length())))
                     .isEqualTo(objectMapper.readTree("""
                         {"ids":[{"appid":101}],"context":{"country_code":"KR",
-                         "language":"koreana"},"data_request":{"include_all_purchase_options":true}}
+                         "language":"koreana"},"data_request":{"include_all_purchase_options":true,
+                         "include_assets":true}}
                         """));
             }).andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
 

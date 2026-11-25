@@ -18,6 +18,7 @@ import kr.co.pricelog.global.client.steam.dto.SteamStoreItem;
 import kr.co.pricelog.global.client.steam.dto.SteamStoreResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -30,9 +31,13 @@ public class SteamStoreClient {
     private static final int SUCCESS = 1;
     private static final int ACCESS_DENIED = 15;
 
+    private static final String ASSET_BASE_URL =
+        "https://shared.fastly.steamstatic.com/store_item_assets/";
+    private static final String FILENAME = "${FILENAME}";
+
     private static final String PURCHASE_OPTIONS_QUERY = """
         {"ids":[%s],"context":{"country_code":"KR","language":"koreana"},
-         "data_request":{"include_all_purchase_options":true}}
+         "data_request":{"include_all_purchase_options":true,"include_assets":true}}
         """;
 
     private final RestClient restClient;
@@ -119,12 +124,29 @@ public class SteamStoreClient {
         if (item.success() == ACCESS_DENIED && (regionRestricted || hidden)) {
             StoreVisibility visibility = regionRestricted
                 ? StoreVisibility.REGION_RESTRICTED : StoreVisibility.HIDDEN;
-            return Optional.of(new SteamPurchaseOptions(List.of(), null, null, visibility));
+            return Optional.of(new SteamPurchaseOptions(List.of(), null, null, visibility, null));
         }
         if (item.success() == SUCCESS && !regionRestricted && !hidden) {
             return Optional.of(new SteamPurchaseOptions(item.options(), item.bestPurchaseOption(),
-                item.freeToPlay()));
+                item.freeToPlay(), StoreVisibility.VISIBLE, headerImageUrl(item.assets())));
         }
         return Optional.empty();
+    }
+
+    /** 상점이 제공한 파일명에는 버전별 하위 경로가 포함될 수 있다. */
+    private static String headerImageUrl(JsonNode assets) {
+        if (assets == null) {
+            return null;
+        }
+        String format = assets.path("asset_url_format").textValue();
+        String header = assets.path("header").textValue();
+        if (!StringUtils.hasText(header)) {
+            header = assets.path("header_2x").textValue();
+        }
+        if (format == null || !format.contains(FILENAME) || !StringUtils.hasText(header)) {
+            return null;
+        }
+
+        return ASSET_BASE_URL + format.replace(FILENAME, header);
     }
 }

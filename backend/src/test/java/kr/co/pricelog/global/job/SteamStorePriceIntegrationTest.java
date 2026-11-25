@@ -1,5 +1,6 @@
 package kr.co.pricelog.global.job;
 
+import static kr.co.pricelog.domain.game.enums.SteamAppType.DLC;
 import static kr.co.pricelog.domain.game.enums.SteamAppType.GAME;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
@@ -87,6 +88,64 @@ class SteamStorePriceIntegrationTest {
             """);
         gameCatalogService.applyPage(GAME, List.of(new SteamApp(301, "게임 A"),
             new SteamApp(302, "게임 B")), Instant.now());
+    }
+
+    @Test
+    @DisplayName("전수 수집은 기본 헤더를 우선 저장하고 이후 고해상도 헤더만 오면 해당 URL로 갱신한다")
+    void savesAndRefreshesGameHeader() {
+        // given
+        gameCatalogService.applyPage(DLC, List.of(new SteamApp(303, "추가 콘텐츠")), SLOT);
+        respondWithItems("""
+            {"item_type":0,"id":302,"success":1},
+            {"item_type":0,"id":301,"success":1,"assets":{
+             "asset_url_format":"steam/apps/301/${FILENAME}?t=15",
+             "header":"v1/header.jpg","header_2x":"v1/header_2x.jpg"}}
+            """);
+        respondWithItems("""
+            {"item_type":0,"id":301,"success":1,"assets":{
+             "asset_url_format":"steam/apps/301/${FILENAME}?t=16","header_2x":"v2/header_2x.jpg"}},
+            {"item_type":0,"id":303,"success":1,"assets":{
+             "asset_url_format":"steam/apps/303/${FILENAME}","header":"dlc.jpg"}}
+            """);
+
+        // when
+        steamStoreCollector.collectAll(SLOT, 2);
+
+        // then
+        String images = "SELECT image_url FROM game ORDER BY steam_app_id";
+        String cdn = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/301/";
+        assertThat(jdbcTemplate.queryForList(images, String.class))
+            .containsExactly(cdn + "v1/header.jpg?t=15", null, null);
+
+        steamStoreCollector.collectPurchaseOptions(List.of(301L, 303L), SLOT.plusSeconds(1));
+        assertThat(jdbcTemplate.queryForList(images, String.class))
+            .containsExactly(cdn + "v2/header_2x.jpg?t=16", null, null);
+        mockRestServiceServer.verify();
+    }
+
+    @Test
+    @DisplayName("이미지 미제공·조회 실패·미노출 응답은 저장된 이미지를 보존하고 확인된 가격은 반영한다")
+    void preservesImageWhenUnconfirmed() {
+        // given
+        String previous = "https://shared.fastly.steamstatic.com/store_item_assets/old.jpg";
+        jdbcTemplate.update("UPDATE game SET image_url = ?", previous);
+        respondWithItems(item(301, DISCOUNT) + """
+            ,{"item_type":0,"id":302,"success":15}
+            """);
+        respondWithItems("""
+            {"item_type":0,"id":301,"success":15,"visible":false}
+            """);
+
+        // when
+        steamStoreCollector.collectPurchaseOptions(List.of(301L, 302L), SLOT);
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), SLOT.plusSeconds(1));
+
+        // then
+        assertThat(jdbcTemplate.queryForList(
+            "SELECT image_url FROM game ORDER BY steam_app_id", String.class))
+            .containsExactly(previous, previous);
+        assertThat(currentPackagePrice()).isEqualTo(1000L);
+        mockRestServiceServer.verify();
     }
 
     @Test

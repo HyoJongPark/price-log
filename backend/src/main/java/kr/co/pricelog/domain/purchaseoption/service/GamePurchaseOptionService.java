@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import kr.co.pricelog.domain.game.entity.Game;
+import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.domain.game.enums.StoreVisibility;
 import kr.co.pricelog.domain.game.repository.GameRepository;
 import kr.co.pricelog.domain.price.repository.PriceHistoryRepository;
@@ -84,10 +85,19 @@ public class GamePurchaseOptionService {
             boolean visible = result.storeVisibility() == StoreVisibility.VISIBLE;
             boolean protectedSale = visible && isAffectedBySaleEnd(entry.getKey(), result,
                 closedSales);
-            Boolean free = visible && !protectedSale ? result.freeToPlay() : game.getFreeToPlay();
+            boolean currentStoreState = visible && !protectedSale;
+            Boolean free = currentStoreState ? result.freeToPlay() : game.getFreeToPlay();
+            String imageUrl = game.getImageUrl();
+            if (currentStoreState && game.getAppType() == SteamAppType.GAME
+                && result.imageUrl() != null) {
+                imageUrl = result.imageUrl();
+            }
+
             if (game.getStoreVisibility() != result.storeVisibility()
-                || !Objects.equals(game.getFreeToPlay(), free)) {
-                changedGames.add(new GameState(game.getId(), result.storeVisibility(), free));
+                || !Objects.equals(game.getFreeToPlay(), free)
+                || !Objects.equals(game.getImageUrl(), imageUrl)) {
+                changedGames.add(new GameState(game.getId(), result.storeVisibility(), free,
+                    imageUrl));
             }
             if (!visible) {
                 continue;
@@ -195,7 +205,8 @@ public class GamePurchaseOptionService {
             gameRepository.updateStoreStates(
                 changedGames.stream().map(GameState::id).toArray(Long[]::new),
                 changedGames.stream().map(s -> s.visibility().name()).toArray(String[]::new),
-                changedGames.stream().map(GameState::free).toArray(Boolean[]::new));
+                changedGames.stream().map(GameState::free).toArray(Boolean[]::new),
+                changedGames.stream().map(GameState::imageUrl).toArray(String[]::new));
         }
     }
 
@@ -254,7 +265,7 @@ public class GamePurchaseOptionService {
             slotAt, observedAt);
     }
 
-    private record GameState(long id, StoreVisibility visibility, Boolean free) {}
+    private record GameState(long id, StoreVisibility visibility, Boolean free, String imageUrl) {}
 
     private record PurchaseOptionKey(SteamPurchaseOptionType type, long steamId) {}
 

@@ -40,6 +40,8 @@ public class Game extends BaseEntity {
     @Column(name = "is_free")
     private Boolean freeToPlay;
 
+    private String imageUrl;
+
     @Enumerated(EnumType.STRING)
     private StoreVisibility storeVisibility;
 }

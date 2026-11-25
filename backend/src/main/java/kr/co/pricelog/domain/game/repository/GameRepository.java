@@ -20,12 +20,13 @@ public interface GameRepository extends Repository<Game, Long> {
     @Modifying
     @Query(value = """
         UPDATE game g SET store_visibility = s.visibility, is_free = s.free,
-            updated_at = CURRENT_TIMESTAMP
+            image_url = s.image_url, updated_at = CURRENT_TIMESTAMP
         FROM unnest(CAST(:ids AS bigint[]), CAST(:visibility AS text[]),
-                    CAST(:free AS boolean[])) AS s(id, visibility, free)
+                    CAST(:free AS boolean[]), CAST(:imageUrls AS text[]))
+             AS s(id, visibility, free, image_url)
         WHERE g.id = s.id AND g.deleted_at IS NULL
         """, nativeQuery = true)
-    void updateStoreStates(Long[] ids, String[] visibility, Boolean[] free);
+    void updateStoreStates(Long[] ids, String[] visibility, Boolean[] free, String[] imageUrls);
 
     /** 같은 앱이 겹치면 목록에서 얻은 필드만 갱신한다. */
     @Modifying

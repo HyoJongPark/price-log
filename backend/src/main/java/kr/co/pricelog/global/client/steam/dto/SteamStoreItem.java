@@ -1,12 +1,14 @@
 package kr.co.pricelog.global.client.steam.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Collections;
 import java.util.List;
 
 /** 상점 조회 결과의 대상과 그 상품에서 선택할 수 있는 구매 옵션. */
 public record SteamStoreItem(long id, int success, @JsonProperty("item_type") Integer itemType,
                              @JsonProperty("is_free") Boolean freeToPlay,
+                             JsonNode assets,
                              @JsonProperty("purchase_options") List<SteamPurchaseOption> options,
                              @JsonProperty("visible") Boolean visible,
                              @JsonProperty("unvailable_for_country_restriction")

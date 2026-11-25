@@ -3,6 +3,7 @@ package kr.co.pricelog.global.job;
 import static kr.co.pricelog.domain.game.enums.SteamAppType.DLC;
 import static kr.co.pricelog.domain.game.enums.SteamAppType.GAME;
 import static kr.co.pricelog.global.client.steam.enums.SteamPurchaseOptionType.PACKAGE;
+import static kr.co.pricelog.global.job.SteamPurchaseOptionsFixture.visiblePurchaseOptions;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
@@ -339,7 +340,7 @@ class SteamAppChangeCollectorIntegrationTest {
     private SteamPurchaseOptions option(long id) {
         SteamPurchaseOption option = new SteamPurchaseOption(PACKAGE, id, "상품",
             new SteamPrice(1000, null, null));
-        return new SteamPurchaseOptions(List.of(option), option, false);
+        return visiblePurchaseOptions(List.of(option), option, false);
     }
 
     private String status(Instant slotAt) {

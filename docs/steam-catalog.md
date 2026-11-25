@@ -32,6 +32,8 @@
 
 카탈로그에서 읽은 본편의 `game.steam_app_id` 목록을 `SteamStoreClient.getPurchaseOptions(steamAppIds)`에 전달하면 한국 상점에 HTTP 요청을 한 번 보낸다. 응답의 앱 ID를 요청 ID와 맞춰 게임별 구매 옵션 목록(`purchaseOptions`)과 Steam 기본 옵션(`bestPurchaseOption`)을 읽는다. 패키지와 번들은 같은 숫자 ID를 쓸 수 있어 종류와 ID를 함께 비교한다. 이름이 없는 상품도 ID로 식별한다.
 
+본편은 같은 요청에 `include_assets=true`를 보내고, 응답의 `assets.asset_url_format`에 있는 `${FILENAME}`을 기본 파일명 `assets.header`로 치환해 Steam CDN 주소를 만든다. 기본 파일명이 없거나 비어 있을 때만 `assets.header_2x`를 사용한다. 이 주소를 `game.image_url`에 저장한다. 두 헤더가 모두 없거나 한국 상점에서 확인되지 않으면 마지막 이미지를 보존한다. 이미 전수를 마친 DB에서는 각 본편의 상점 응답을 다시 받을 때부터 채워진다.
+
 기본 지정이 생략되면 전체 목록을 반환하고 `bestPurchaseOption`은 `null`이다. 옵션이 하나인 경우에도 같다. Steam이 기본값을 지정했는데 같은 종류·ID의 항목이 없거나 둘 이상이면 조회가 실패한다. 앱의 무료 표기와 각 상품의 종류·ID·이름·확인된 가격을 읽는다.
 
 ## 게임별 구매 옵션 저장
