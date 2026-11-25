@@ -95,7 +95,8 @@ class SteamStorePriceIntegrationTest {
     @DisplayName("전수 수집은 기본 헤더를 우선 저장하고 이후 고해상도 헤더만 오면 해당 URL로 갱신한다")
     void savesAndRefreshesGameHeader() {
         // given
-        gameCatalogService.applyPage(DLC, List.of(new SteamApp(303, "추가 콘텐츠")), SLOT);
+        gameCatalogService.applyPage(DLC, List.of(new SteamApp(303, "추가 콘텐츠")), Map.of(303L, 301L),
+            SLOT);
         respondWithItems("""
             {"item_type":0,"id":302,"success":1},
             {"item_type":0,"id":301,"success":1,"assets":{
@@ -128,7 +129,8 @@ class SteamStorePriceIntegrationTest {
     @DisplayName("본편별 짧은 설명을 저장하고 재수집 때 내용이 있는 설명만 갱신한다")
     void collectsGameDescriptions() {
         // given
-        gameCatalogService.applyPage(DLC, List.of(new SteamApp(303, "추가 콘텐츠")), SLOT);
+        gameCatalogService.applyPage(DLC, List.of(new SteamApp(303, "추가 콘텐츠")), Map.of(303L, 301L),
+            SLOT);
         respondWithItems("""
             {"item_type":0,"id":302,"success":1,"basic_info":{"short_description":"기존 소개"}},
             {"item_type":0,"id":301,"success":1,"basic_info":{"short_description":"첫 소개"}}
@@ -209,6 +211,33 @@ class SteamStorePriceIntegrationTest {
             .extracting("release_date", "release_text", "coming_soon", "korean_support_text")
             .containsExactly(tuple(null, "발표 예정", true, "미지원"),
                 tuple("2016-11-02", null, false, "미지원"));
+        mockRestServiceServer.verify();
+    }
+
+    @Test
+    @DisplayName("날짜가 없어도 명시된 출시 예정 해제는 반영하고 기존 실제 출시일은 보존한다")
+    void appliesExplicitReleaseFlagWithoutDate() {
+        // given
+        respondWithItems("""
+            {"item_type":0,"id":301,"success":1,"release":{"is_coming_soon":true,
+             "custom_release_date_message":"발표 예정"}},
+            {"item_type":0,"id":302,"success":1,"release":{"steam_release_date":1478035243}}
+            """);
+        respondWithItems("""
+            {"item_type":0,"id":301,"success":1,"release":{"is_coming_soon":false}},
+            {"item_type":0,"id":302,"success":1,"release":{"is_coming_soon":false}}
+            """);
+        List<Long> ids = List.of(301L, 302L);
+        steamStoreCollector.collectPurchaseOptions(ids, SLOT);
+
+        // when
+        steamStoreCollector.collectPurchaseOptions(ids, SLOT.plusSeconds(1));
+
+        // then
+        assertThat(jdbcTemplate.queryForList("""
+            SELECT coming_soon, release_date::text, release_text FROM game ORDER BY steam_app_id
+            """)).extracting("coming_soon", "release_date", "release_text")
+            .containsExactly(tuple(false, null, null), tuple(false, "2016-11-02", null));
         mockRestServiceServer.verify();
     }
 

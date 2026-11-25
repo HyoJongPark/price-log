@@ -97,7 +97,8 @@ public class GamePurchaseOptionService {
             boolean protectedSale = visible && isAffectedBySaleEnd(entry.getKey(), result,
                 closedSales);
             boolean currentStoreState = visible && !protectedSale;
-            Boolean free = currentStoreState ? result.freeToPlay() : game.getFreeToPlay();
+            Boolean free = currentStoreState && result.freeToPlay() != null
+                ? result.freeToPlay() : game.getFreeToPlay();
             boolean updateGameDetails = visibleGame && !protectedSale;
             String imageUrl = updateGameDetails && result.imageUrl() != null
                 ? result.imageUrl() : game.getImageUrl();
@@ -105,11 +106,14 @@ public class GamePurchaseOptionService {
                 ? result.description() : game.getDescription();
 
             SteamRelease release = updateGameDetails ? result.release() : null;
+            // 출시 예정이 끝나면 예고 일정은 지우고, 이미 확인한 출시일은 날짜 생략 시 보존한다.
+            boolean updateSchedule = release != null
+                && (release.comingSoon() || release.date() != null || game.getComingSoon());
             String koreanSupport = updateGameDetails && result.koreanSupportText() != null
                 ? result.koreanSupportText() : game.getKoreanSupportText();
             GameState state = new GameState(game.getId(), result.storeVisibility(), free,
-                imageUrl, description, release == null ? game.getReleaseDate() : release.date(),
-                release == null ? game.getReleaseText() : release.text(),
+                imageUrl, description, updateSchedule ? release.date() : game.getReleaseDate(),
+                updateSchedule ? release.text() : game.getReleaseText(),
                 release == null ? game.getComingSoon() : Boolean.valueOf(release.comingSoon()),
                 koreanSupport);
             if (state.differsFrom(game)) {

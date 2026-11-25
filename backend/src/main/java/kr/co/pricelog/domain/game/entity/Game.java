@@ -40,8 +40,8 @@ public class Game extends BaseEntity {
     @Column(nullable = false)
     private Instant catalogUpdatedAt;
 
-    @Column(name = "is_free")
-    private Boolean freeToPlay;
+    @Column(name = "is_free", nullable = false)
+    private Boolean freeToPlay = false;
 
     private String imageUrl;
 
@@ -51,7 +51,8 @@ public class Game extends BaseEntity {
 
     private String releaseText;
 
-    private Boolean comingSoon;
+    @Column(nullable = false)
+    private Boolean comingSoon = false;
 
     private String koreanSupportText;
 

@@ -168,7 +168,8 @@ class SteamGameTagIntegrationTest {
     @DisplayName("기존 설치의 보완은 지정한 커서 다음 본편만 조회하며 가격 회차와 이력을 보존한다")
     void backfillsOnlyRemainingBaseGames() {
         // given
-        gameCatalogService.applyPage(DLC, List.of(new SteamApp(30, "DLC")), Instant.now());
+        gameCatalogService.applyPage(DLC, List.of(new SteamApp(30, "DLC")), Map.of(30L, 10L),
+            Instant.now());
         store("""
             {"item_type":0,"success":1,"id":20,"purchase_options":[{"packageid":31,
              "final_price_in_cents":"100000","formatted_final_price":"₩ 1,000"}]},

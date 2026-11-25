@@ -77,11 +77,11 @@ class SteamStoreCollectorIntegrationTest {
 
         // then
         assertThat(freeFlag(requestedAppId)).isTrue();
-        assertThat(freeFlag(otherAppId)).isNull();
+        assertThat(freeFlag(otherAppId)).isFalse();
     }
 
     @Test
-    @DisplayName("무료 표기 변경과 생략을 반영하고 상점 실패와 카탈로그 재수집에서 기존 값을 보존한다")
+    @DisplayName("무료 표기가 생략되거나 조회에 실패하면 보존하고 명시된 유료 전환을 반영한다")
     void persistsLatestSuccessfulFreeFlag() {
         // given
         long steamAppId = 101L;
@@ -91,8 +91,8 @@ class SteamStoreCollectorIntegrationTest {
         when(steamStoreClient.getPurchaseOptions(List.of(steamAppId)))
             .thenReturn(Map.of(steamAppId, free))
             .thenThrow(new RestClientException("상점 조회 실패"))
-            .thenReturn(Map.of(steamAppId, visiblePurchaseOptions(List.of(), null, false)))
-            .thenReturn(Map.of(steamAppId, visiblePurchaseOptions(List.of(), null, null)));
+            .thenReturn(Map.of(steamAppId, visiblePurchaseOptions(List.of(), null, null)))
+            .thenReturn(Map.of(steamAppId, visiblePurchaseOptions(List.of(), null, false)));
 
         // when
         Map<Long, SteamPurchaseOptions> result = steamStoreCollector.collectPurchaseOptions(
@@ -111,10 +111,10 @@ class SteamStoreCollectorIntegrationTest {
             """, String.class, steamAppId)).isEqualTo("새 이름");
 
         steamStoreCollector.collectPurchaseOptions(List.of(steamAppId), SLOT);
-        assertThat(freeFlag(steamAppId)).isFalse();
+        assertThat(freeFlag(steamAppId)).isTrue();
 
         steamStoreCollector.collectPurchaseOptions(List.of(steamAppId), SLOT);
-        assertThat(freeFlag(steamAppId)).isNull();
+        assertThat(freeFlag(steamAppId)).isFalse();
     }
 
     @Nested
@@ -278,7 +278,7 @@ class SteamStoreCollectorIntegrationTest {
             List<Long> appIds = List.of(301L, 302L);
             Map<Long, SteamPurchaseOptions> confirmed = new LinkedHashMap<>();
             SteamPurchaseOptions options = visiblePurchaseOptions(
-                List.of(edition), edition, false);
+                List.of(edition), edition, true);
             appIds.forEach(appId -> confirmed.put(appId, options));
             when(steamStoreClient.getPurchaseOptions(appIds)).thenReturn(confirmed);
 
@@ -290,9 +290,9 @@ class SteamStoreCollectorIntegrationTest {
             assertThat(failure).isInstanceOf(IllegalStateException.class)
                 .hasMessage("활성 카탈로그에 없는 Steam 앱: 302");
             assertThat(activeOptions(301)).isEmpty();
-            assertThat(freeFlag(301)).isNull();
+            assertThat(freeFlag(301)).isFalse();
             assertThat(activeOptions(302)).isEmpty();
-            assertThat(freeFlag(302)).isNull();
+            assertThat(freeFlag(302)).isFalse();
         }
 
         @Test

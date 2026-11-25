@@ -4,6 +4,7 @@ import static kr.co.pricelog.domain.game.enums.SteamAppType.DLC;
 import static kr.co.pricelog.domain.game.enums.SteamAppType.GAME;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -134,6 +135,33 @@ class SteamCatalogCollectorIntegrationTest {
         }
 
         @Test
+        @DisplayName("부모를 확인하지 못해도 기존 DLC와 연결은 보존하고 새 DLC만 건너뛴다")
+        void preservesExistingDlcWhenParentIsUnavailable() {
+            // given
+            gameCatalogService.applyPage(GAME, List.of(new SteamApp(10, "본편")), FIRST);
+            gameCatalogService.applyPage(DLC, List.of(new SteamApp(11, "연결됨")),
+                Map.of(11L, 10L), FIRST);
+            jdbcTemplate.update("""
+                INSERT INTO game (steam_app_id, name, app_type, catalog_updated_at,
+                                  created_at, updated_at)
+                VALUES (12, '기존 미연결', 'DLC', now(), now(), now())
+                """);
+
+            // when
+            gameCatalogService.applyPage(DLC, List.of(new SteamApp(11, "연결됨"),
+                new SteamApp(12, "기존 미연결"), new SteamApp(13, "신규")),
+                Map.of(12L, 99L, 13L, 99L), Instant.now());
+
+            // then
+            assertThat(jdbcTemplate.queryForList("""
+                SELECT dlc.steam_app_id, parent.steam_app_id AS parent
+                FROM game dlc LEFT JOIN game parent ON parent.id = dlc.parent_game_id
+                WHERE dlc.app_type = 'DLC' AND dlc.deleted_at IS NULL ORDER BY dlc.steam_app_id
+                """)).extracting("steam_app_id", "parent")
+                .containsExactly(tuple(11L, 10L), tuple(12L, null));
+        }
+
+        @Test
         @DisplayName("앱 번호와 이름을 종류에 맞게 저장하고 같은 페이지 재생은 갱신하지 않는다")
         void storesGamesAndDlcOnce() {
             // given
@@ -143,7 +171,7 @@ class SteamCatalogCollectorIntegrationTest {
             // when
             gameCatalogService.applyPage(GAME, games, FIRST);
             gameCatalogService.applyPage(DLC, List.of(new SteamApp(660, "Portal 2 MotionPack")),
-                FIRST);
+                Map.of(660L, 10L), FIRST);
             gameCatalogService.applyPage(GAME, games, NEXT);
 
             // then
@@ -153,7 +181,7 @@ class SteamCatalogCollectorIntegrationTest {
                 """, String.class)).containsExactly("10/GAME/Counter-Strike",
                     "20/GAME/Team Fortress Classic", "660/DLC/Portal 2 MotionPack");
             assertThat(jdbcTemplate.queryForObject("""
-                SELECT count(*) FROM game WHERE is_free IS NULL AND parent_game_id IS NULL
+                SELECT count(*) FROM game WHERE NOT is_free AND NOT coming_soon
                   AND detail_checked_at IS NULL AND updated_at = created_at
                 """, Integer.class)).isEqualTo(3);
         }
@@ -163,7 +191,8 @@ class SteamCatalogCollectorIntegrationTest {
         void readsStoredAppTypes() {
             // given
             gameCatalogService.applyPage(GAME, List.of(new SteamApp(10, "본편")), FIRST);
-            gameCatalogService.applyPage(DLC, List.of(new SteamApp(20, "DLC")), FIRST);
+            gameCatalogService.applyPage(DLC, List.of(new SteamApp(20, "DLC")),
+                Map.of(20L, 10L), FIRST);
             jdbcTemplate.update("""
                 INSERT INTO game
                     (steam_app_id, name, app_type, catalog_updated_at, created_at, updated_at)
@@ -231,7 +260,9 @@ class SteamCatalogCollectorIntegrationTest {
         @DisplayName("늦게 반영된 이전 시각의 목록이 최신 이름과 종류를 되돌리지 않는다")
         void ignoresOlderWrite() {
             // given
-            gameCatalogService.applyPage(DLC, List.of(new SteamApp(660, "New")), NEXT);
+            gameCatalogService.applyPage(GAME, List.of(new SteamApp(10, "본편")), FIRST);
+            gameCatalogService.applyPage(DLC, List.of(new SteamApp(660, "New")),
+                Map.of(660L, 10L), NEXT);
 
             // when
             gameCatalogService.applyPage(GAME, List.of(new SteamApp(660, "Old")), FIRST);
@@ -299,7 +330,7 @@ class SteamCatalogCollectorIntegrationTest {
             // then
             assertThat(failure).hasMessage("상점 중단");
             assertThat(afterFailure).containsExactly(1250L);
-            assertThat(appIds()).containsExactly(660L, 1250L, 1256L, 1257L, 1258L);
+            assertThat(appIds()).containsExactly(1250L, 1256L, 1257L);
             assertThat(jdbcTemplate.queryForList("""
                 SELECT dlc.steam_app_id FROM game dlc
                 JOIN game parent ON dlc.parent_game_id = parent.id
@@ -342,6 +373,8 @@ class SteamCatalogCollectorIntegrationTest {
                 return morePages(10);
             });
             when(steamAppListClient.getPage(GAME, 10, PAGE_SIZE)).thenReturn(lastPage(20, "B"));
+            when(steamStoreClient.getDlcParents(List.of(660L))).thenReturn(Map.of(660L, 10L));
+            when(steamStoreClient.getDlcParents(List.of(670L))).thenReturn(Map.of(670L, 20L));
             when(steamAppListClient.getPage(DLC, 0, PAGE_SIZE)).thenReturn(morePages(660));
             when(steamAppListClient.getPage(DLC, 660, PAGE_SIZE))
                 .thenThrow(new RestClientException("DLC 조회 중단")).thenAnswer(call -> {
@@ -441,6 +474,8 @@ class SteamCatalogCollectorIntegrationTest {
                 .thenReturn(lastPage(10, "첫 본편"), lastPage(20, "새 본편"));
             when(steamAppListClient.getPage(DLC, 0, PAGE_SIZE))
                 .thenReturn(lastPage(30, "첫 DLC"), lastPage(40, "새 DLC"));
+            when(steamStoreClient.getDlcParents(List.of(30L))).thenReturn(Map.of(30L, 10L));
+            when(steamStoreClient.getDlcParents(List.of(40L))).thenReturn(Map.of(40L, 20L));
             steamCatalogCollector.collectAll(FIRST);
 
             // when

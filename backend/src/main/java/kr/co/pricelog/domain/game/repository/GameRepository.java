@@ -58,11 +58,13 @@ public interface GameRepository extends Repository<Game, Long> {
             (steam_app_id, name, app_type, parent_game_id,
              catalog_updated_at, created_at, updated_at)
         SELECT DISTINCT ON (app_id) app_id, app_name, :#{#appType.name()},
-            CASE WHEN parent_app_id IS NOT NULL AND parent_app_id NOT IN (SELECT app_id FROM page)
-                 THEN (SELECT p.id FROM game p WHERE p.steam_app_id = page.parent_app_id
-                       AND p.app_type = 'GAME' AND p.deleted_at IS NULL) END,
-            :now, :now, :now
+            parent.id, :now, :now, :now
         FROM page
+        LEFT JOIN game parent ON parent.steam_app_id = page.parent_app_id
+            AND parent.app_type = 'GAME' AND parent.deleted_at IS NULL
+            AND page.parent_app_id NOT IN (SELECT app_id FROM page)
+        WHERE :#{#appType.name()} <> 'DLC' OR parent.id IS NOT NULL
+            OR EXISTS (SELECT 1 FROM game existing WHERE existing.steam_app_id = page.app_id)
         ORDER BY app_id, position DESC
         ON CONFLICT (steam_app_id) DO UPDATE SET
             name = EXCLUDED.name,

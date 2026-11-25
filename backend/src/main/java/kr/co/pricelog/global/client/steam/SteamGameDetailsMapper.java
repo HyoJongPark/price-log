@@ -58,7 +58,10 @@ final class SteamGameDetailsMapper {
             && timestamp.asLong() <= 0xffff_ffffL
             ? Instant.ofEpochSecond(timestamp.asLong()).atZone(SEOUL).toLocalDate() : null;
         if (!release.path("is_coming_soon").asBoolean()) {
-            return date == null ? null : new SteamRelease(date, null, false);
+            if (date != null || release.path("is_coming_soon").isBoolean()) {
+                return new SteamRelease(date, null, false);
+            }
+            return null;
         }
 
         String message = textOrNull(release.path("custom_release_date_message"));
