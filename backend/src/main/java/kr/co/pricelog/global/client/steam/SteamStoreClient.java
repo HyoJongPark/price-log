@@ -37,14 +37,19 @@ public class SteamStoreClient {
     private static final String FILENAME = "${FILENAME}";
 
     private static final String PURCHASE_OPTIONS_QUERY = """
-        {"ids":[%s],"context":{"country_code":"KR","language":"koreana"},
+        {"ids":[{ids}],"context":{"country_code":"KR","language":"koreana"},
          "data_request":{
           "include_all_purchase_options":true,"include_assets":true,"include_basic_info":true,
-          "include_release":true,"include_supported_languages":true}}
-        """;
+          "include_release":true,"include_supported_languages":true,"include_tag_count":%d}}
+        """.formatted(SteamGameDetailsMapper.TAG_COUNT);
+
+    private static final String TAGS_QUERY = """
+        {"ids":[{ids}],"context":{"country_code":"KR","language":"koreana"},
+         "data_request":{"include_tag_count":%d}}
+        """.formatted(SteamGameDetailsMapper.TAG_COUNT);
 
     private static final String DLC_PARENTS_QUERY = """
-        {"ids":[%s],"context":{"country_code":"KR","language":"koreana"},
+        {"ids":[{ids}],"context":{"country_code":"KR","language":"koreana"},
          "data_request":{"include_related_items":true}}
         """;
 
@@ -64,6 +69,17 @@ public class SteamStoreClient {
     @Retry(name = "steamRequest")
     public Map<Long, SteamPurchaseOptions> getPurchaseOptions(List<Long> steamAppIds) {
         return getItems(steamAppIds, PURCHASE_OPTIONS_QUERY, this::readPurchaseOptions);
+    }
+
+    /** 기존 카탈로그를 보완할 때에는 구매 옵션 없이 태그만 묶어서 읽는다. */
+    @Retry(name = "steamRequest")
+    public Map<Long, List<Long>> getGameTags(List<Long> steamAppIds) {
+        return getItems(steamAppIds, TAGS_QUERY, item -> {
+            if (!isVisibleApp(item)) {
+                return Optional.empty();
+            }
+            return Optional.ofNullable(SteamGameDetailsMapper.tagIds(item.get("tagids")));
+        });
     }
 
     /** 한국 상점에서 확인된 DLC 앱 번호와 부모 앱 번호를 반환한다. */
@@ -100,7 +116,7 @@ public class SteamStoreClient {
             .collect(Collectors.joining(","));
         SteamStoreResponse result = restClient.get()
             .uri("/IStoreBrowseService/GetItems/v1/?input_json={query}",
-                query.formatted(ids))
+                query.replace("{ids}", ids))
             .retrieve()
             .body(SteamStoreResponse.class);
 
@@ -115,21 +131,36 @@ public class SteamStoreClient {
         Map<Long, T> confirmed = new LinkedHashMap<>();
         for (long steamAppId : steamAppIds) {
             List<JsonNode> items = itemsById.get(steamAppId);
-            if (items != null && items.size() == 1) {
-                readItem.apply(items.getFirst())
+            if (items == null || items.size() != 1) {
+                continue;
+            }
+
+            JsonNode item = items.getFirst();
+            if (hasValidVisibilityFields(item)) {
+                readItem.apply(item)
                     .ifPresent(value -> confirmed.put(steamAppId, value));
             }
         }
         return Collections.unmodifiableMap(confirmed);
     }
 
+    /** Steam은 노출 플래그를 생략할 수 있다. 명시된 값이 깨졌으면 해당 앱만 건너뛴다. */
+    private static boolean hasValidVisibilityFields(JsonNode item) {
+        JsonNode visible = item.path("visible");
+        JsonNode restricted = item.path("unvailable_for_country_restriction");
+        return (visible.isMissingNode() || visible.isBoolean())
+            && (restricted.isMissingNode() || restricted.isBoolean());
+    }
+
+    private static boolean isVisibleApp(JsonNode item) {
+        return item.path("item_type").asInt(-1) == APP_ITEM_TYPE
+            && item.path("success").asInt() == SUCCESS && item.path("visible").asBoolean(true)
+            && !item.path("unvailable_for_country_restriction").asBoolean();
+    }
+
     private static Optional<Long> readParentAppId(JsonNode item) {
         JsonNode parent = item.path("related_items").path("parent_appid");
-        if (item.path("item_type").asInt(-1) != APP_ITEM_TYPE
-            || item.path("success").asInt() != SUCCESS
-            || !item.path("visible").asBoolean(true)
-            || item.path("unvailable_for_country_restriction").asBoolean()
-            || !parent.isIntegralNumber() || !parent.canConvertToLong()
+        if (!isVisibleApp(item) || !parent.isIntegralNumber() || !parent.canConvertToLong()
             || parent.longValue() <= 0) {
             return Optional.empty();
         }
@@ -158,7 +189,7 @@ public class SteamStoreClient {
             StoreVisibility visibility = regionRestricted
                 ? StoreVisibility.REGION_RESTRICTED : StoreVisibility.HIDDEN;
             return Optional.of(new SteamPurchaseOptions(List.of(), null, null, visibility,
-                null, null, null, null));
+                null, null, null, null, null));
         }
         if (item.success() == SUCCESS && !regionRestricted && !hidden) {
             String description = item.basicInfo() == null ? null
@@ -166,7 +197,8 @@ public class SteamStoreClient {
             return Optional.of(new SteamPurchaseOptions(item.options(), item.bestPurchaseOption(),
                 item.freeToPlay(), StoreVisibility.VISIBLE, headerImageUrl(item.assets()),
                 description, SteamGameDetailsMapper.release(item.release()),
-                SteamGameDetailsMapper.koreanSupport(item.supportedLanguages())));
+                SteamGameDetailsMapper.koreanSupport(item.supportedLanguages()),
+                SteamGameDetailsMapper.tagIds(item.tagIds())));
         }
         return Optional.empty();
     }

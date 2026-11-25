@@ -132,7 +132,8 @@ class SteamStoreClientTest {
                         {"ids":[{"appid":101}],"context":{"country_code":"KR",
                          "language":"koreana"},"data_request":{"include_all_purchase_options":true,
                          "include_assets":true,"include_basic_info":true,
-                         "include_release":true,"include_supported_languages":true}}
+                         "include_release":true,"include_supported_languages":true,
+                         "include_tag_count":20}}
                         """));
             }).andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
 

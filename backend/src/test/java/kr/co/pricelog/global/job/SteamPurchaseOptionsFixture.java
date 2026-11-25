@@ -14,6 +14,6 @@ final class SteamPurchaseOptionsFixture {
                                                       SteamPurchaseOption bestPurchaseOption,
                                                       Boolean freeToPlay) {
         return new SteamPurchaseOptions(options, bestPurchaseOption, freeToPlay,
-            StoreVisibility.VISIBLE, null, null, null, null);
+            StoreVisibility.VISIBLE, null, null, null, null, null);
     }
 }

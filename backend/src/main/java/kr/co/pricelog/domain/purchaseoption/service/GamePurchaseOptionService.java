@@ -18,6 +18,7 @@ import kr.co.pricelog.domain.game.entity.Game;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.domain.game.enums.StoreVisibility;
 import kr.co.pricelog.domain.game.repository.GameRepository;
+import kr.co.pricelog.domain.game.service.GameTagService;
 import kr.co.pricelog.domain.price.repository.PriceHistoryRepository;
 import kr.co.pricelog.domain.purchaseoption.dto.ClosedPurchaseOption;
 import kr.co.pricelog.domain.purchaseoption.entity.PurchaseOption;
@@ -42,6 +43,7 @@ public class GamePurchaseOptionService {
     private static final int OPTIONS_PER_QUERY = 30_000;
 
     private final GameRepository gameRepository;
+    private final GameTagService gameTagService;
     private final PurchaseOptionRepository purchaseOptionRepository;
     private final GamePurchaseOptionRepository gamePurchaseOptionRepository;
     private final PriceHistoryRepository priceHistoryRepository;
@@ -71,6 +73,7 @@ public class GamePurchaseOptionService {
         Map<PurchaseOptionKey, PurchaseOption> activeOptions =
             loadActiveOptions(confirmed.values());
         ClosedSales closedSales = loadClosedSales(slotAt);
+        Map<Long, List<Long>> tagsByGame = new HashMap<>();
         List<GameState> changedGames = new ArrayList<>();
         Set<Long> confirmedGameIds = new HashSet<>();
         Map<PurchaseOptionKey, String> names = new HashMap<>();
@@ -85,11 +88,17 @@ public class GamePurchaseOptionService {
 
             SteamPurchaseOptions result = entry.getValue();
             boolean visible = result.storeVisibility() == StoreVisibility.VISIBLE;
+            boolean visibleGame = visible && game.getAppType() == SteamAppType.GAME;
+            // 태그는 재개한 회차에서도 지금 확인한 본편의 순서를 따른다.
+            if (visibleGame && result.tagIds() != null) {
+                tagsByGame.put(game.getId(), result.tagIds());
+            }
+
             boolean protectedSale = visible && isAffectedBySaleEnd(entry.getKey(), result,
                 closedSales);
             boolean currentStoreState = visible && !protectedSale;
             Boolean free = currentStoreState ? result.freeToPlay() : game.getFreeToPlay();
-            boolean updateGameDetails = currentStoreState && game.getAppType() == SteamAppType.GAME;
+            boolean updateGameDetails = visibleGame && !protectedSale;
             String imageUrl = updateGameDetails && result.imageUrl() != null
                 ? result.imageUrl() : game.getImageUrl();
             String description = updateGameDetails && result.description() != null
@@ -127,6 +136,7 @@ public class GamePurchaseOptionService {
         }
 
         saveGameStates(changedGames);
+        gameTagService.saveGameTags(tagsByGame);
         saveChangedNames(names, activeOptions);
         saveLinks(confirmedGameIds, links, activeOptions, observedAt);
         savePrices(prices, activeOptions, slotAt, observedAt);

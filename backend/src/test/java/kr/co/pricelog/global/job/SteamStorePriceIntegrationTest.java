@@ -84,7 +84,8 @@ class SteamStorePriceIntegrationTest {
         steamStoreCollector = new SteamStoreCollector(new SteamStoreClient(restClientBuilder,
             objectMapper), steamPriceCollectionService);
         jdbcTemplate.execute("""
-            TRUNCATE pipeline_execution, price_history, game_purchase_option, purchase_option, game
+            TRUNCATE pipeline_execution, price_history, game_purchase_option, purchase_option,
+                     game_tag, game
             """);
         gameCatalogService.applyPage(GAME, List.of(new SteamApp(301, "게임 A"),
             new SteamApp(302, "게임 B")), Instant.now());
@@ -419,6 +420,31 @@ class SteamStorePriceIntegrationTest {
             SELECT count(*) FROM purchase_option
             WHERE type = 'PACKAGE' AND deleted_at IS NULL AND sale_ended_at IS NULL
             """, Integer.class)).isZero();
+        mockRestServiceServer.verify();
+    }
+
+    @Test
+    @DisplayName("판매 종료 전 회차를 다시 조회하면 종료된 가격은 보호하고 본편 태그는 갱신한다")
+    void refreshesTagsWhenReplayingAnEndedSale() {
+        // given
+        respond(301, DISCOUNT);
+        respondWithItems("""
+            {"item_type":0,"success":1,"id":301,"tagids":[8,3],"purchase_options":[
+             {"packageid":31,%s}]}
+            """.formatted(ZERO));
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), SLOT);
+        gamePurchaseOptionService.endSale(activePackageId(), SALE_END);
+
+        // when
+        steamStoreCollector.collectPurchaseOptions(List.of(301L), SALE_END.minusSeconds(1));
+
+        // then
+        assertThat(jdbcTemplate.queryForList("""
+            SELECT t.steam_tag_id FROM game_tag gt JOIN tag t ON t.id = gt.tag_id
+            JOIN game g ON g.id = gt.game_id WHERE g.steam_app_id = 301 ORDER BY gt.display_order
+            """, Long.class)).containsExactly(8L, 3L);
+        assertThat(packageHistory()).containsExactly(1000L);
+        assertThat(currentPackagePrice()).isEqualTo(1000L);
         mockRestServiceServer.verify();
     }
 

@@ -9,6 +9,7 @@ import java.util.List;
 public record SteamStoreItem(long id, int success, @JsonProperty("item_type") Integer itemType,
                              @JsonProperty("is_free") Boolean freeToPlay,
                              JsonNode assets,
+                             @JsonProperty("tagids") JsonNode tagIds,
                              JsonNode release,
                              @JsonProperty("supported_languages") JsonNode supportedLanguages,
                              @JsonProperty("basic_info") JsonNode basicInfo,

@@ -15,6 +15,7 @@ import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 import kr.co.pricelog.domain.game.service.GameCatalogService;
 import kr.co.pricelog.global.client.steam.SteamAppListClient;
+import kr.co.pricelog.global.client.steam.SteamTagDictionaryClient;
 import kr.co.pricelog.global.client.steam.dto.SteamApp;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -59,6 +60,9 @@ class SteamPriceRecoveryIntegrationTest {
     @MockitoBean
     private SteamAppListClient steamAppListClient;
 
+    @MockitoBean
+    private SteamTagDictionaryClient steamTagDictionaryClient;
+
     @Autowired
     private ObjectMapper objectMapper;
 
@@ -74,7 +78,8 @@ class SteamPriceRecoveryIntegrationTest {
     @BeforeEach
     void setUp() {
         jdbcTemplate.execute("""
-            TRUNCATE pipeline_execution, price_history, game_purchase_option, purchase_option, game
+            TRUNCATE pipeline_execution, price_history, game_purchase_option, purchase_option,
+                     game_tag, game
             """);
         gameCatalogService.applyPage(GAME, TARGETS.stream().map(id -> new SteamApp(id, "게임 " + id))
             .toList(), SLOT);

@@ -12,6 +12,8 @@ import kr.co.pricelog.global.client.steam.dto.SteamRelease;
 /** 한국 상점 응답을 달력의 공개 날짜와 게임 상세의 언어 지원 문구로 변환한다. */
 final class SteamGameDetailsMapper {
 
+    static final int TAG_COUNT = 20;
+
     private static final int KOREAN_LANGUAGE = 4;
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
@@ -24,6 +26,25 @@ final class SteamGameDetailsMapper {
             return null;
         }
         return text;
+    }
+
+    /** Steam 응답 순서대로 검색용 상위 20개를 보존한다. 불완전한 배열로 기존 연결을 지우지 않는다. */
+    static List<Long> tagIds(JsonNode tags) {
+        if (tags == null || !tags.isArray()) {
+            return null;
+        }
+        List<Long> ids = new ArrayList<>();
+        for (JsonNode tag : tags) {
+            if (!tag.isIntegralNumber() || !tag.canConvertToLong() || tag.longValue() <= 0
+                || ids.contains(tag.longValue())) {
+                return null;
+            }
+            ids.add(tag.longValue());
+            if (ids.size() == TAG_COUNT) {
+                break;
+            }
+        }
+        return List.copyOf(ids);
     }
 
     static SteamRelease release(JsonNode release) {

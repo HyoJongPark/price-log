@@ -9,7 +9,7 @@ public record SteamPurchaseOptions(List<SteamPurchaseOption> purchaseOptions,
                                    SteamPurchaseOption bestPurchaseOption, Boolean freeToPlay,
                                    StoreVisibility storeVisibility, String imageUrl,
                                    String description, SteamRelease release,
-                                   String koreanSupportText) {
+                                   String koreanSupportText, List<Long> tagIds) {
 
     /** 기본 옵션의 종류와 ID를 구매 목록에 대응시켜 해당 목록의 상품을 반환한다. */
     public SteamPurchaseOptions {
