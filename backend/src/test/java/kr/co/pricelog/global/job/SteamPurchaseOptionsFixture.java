@@ -5,7 +5,7 @@ import kr.co.pricelog.domain.game.enums.StoreVisibility;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOption;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
 
-/** 수집기 테스트에 사용하는 이미지 없는 정상 상점 응답. */
+/** 수집기 테스트에 사용하는 이미지와 설명이 없는 정상 상점 응답. */
 final class SteamPurchaseOptionsFixture {
 
     private SteamPurchaseOptionsFixture() {}
@@ -14,6 +14,6 @@ final class SteamPurchaseOptionsFixture {
                                                       SteamPurchaseOption bestPurchaseOption,
                                                       Boolean freeToPlay) {
         return new SteamPurchaseOptions(options, bestPurchaseOption, freeToPlay,
-            StoreVisibility.VISIBLE, null);
+            StoreVisibility.VISIBLE, null, null, null, null);
     }
 }

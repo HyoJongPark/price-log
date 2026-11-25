@@ -9,6 +9,9 @@ import java.util.List;
 public record SteamStoreItem(long id, int success, @JsonProperty("item_type") Integer itemType,
                              @JsonProperty("is_free") Boolean freeToPlay,
                              JsonNode assets,
+                             JsonNode release,
+                             @JsonProperty("supported_languages") JsonNode supportedLanguages,
+                             @JsonProperty("basic_info") JsonNode basicInfo,
                              @JsonProperty("purchase_options") List<SteamPurchaseOption> options,
                              @JsonProperty("visible") Boolean visible,
                              @JsonProperty("unvailable_for_country_restriction")

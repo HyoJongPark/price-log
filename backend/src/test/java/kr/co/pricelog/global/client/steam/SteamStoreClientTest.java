@@ -131,7 +131,8 @@ class SteamStoreClientTest {
                     .isEqualTo(objectMapper.readTree("""
                         {"ids":[{"appid":101}],"context":{"country_code":"KR",
                          "language":"koreana"},"data_request":{"include_all_purchase_options":true,
-                         "include_assets":true}}
+                         "include_assets":true,"include_basic_info":true,
+                         "include_release":true,"include_supported_languages":true}}
                         """));
             }).andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
 

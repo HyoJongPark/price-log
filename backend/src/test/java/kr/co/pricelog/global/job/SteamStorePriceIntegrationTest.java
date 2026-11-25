@@ -124,6 +124,94 @@ class SteamStorePriceIntegrationTest {
     }
 
     @Test
+    @DisplayName("본편별 짧은 설명을 저장하고 재수집 때 내용이 있는 설명만 갱신한다")
+    void collectsGameDescriptions() {
+        // given
+        gameCatalogService.applyPage(DLC, List.of(new SteamApp(303, "추가 콘텐츠")), SLOT);
+        respondWithItems("""
+            {"item_type":0,"id":302,"success":1,"basic_info":{"short_description":"기존 소개"}},
+            {"item_type":0,"id":301,"success":1,"basic_info":{"short_description":"첫 소개"}}
+            """);
+        respondWithItems("""
+            {"item_type":0,"id":301,"success":1,"basic_info":{"short_description":"수정된 소개"}},
+            {"item_type":0,"id":302,"success":1,
+             "basic_info":{"short_description":" \\u00a0\\u202f "}},
+            {"item_type":0,"id":303,"success":1,"basic_info":{"short_description":"DLC 소개"}}
+            """);
+        respondWithItems("""
+            {"item_type":0,"id":301,"success":1},
+            {"item_type":0,"id":302,"success":15,"visible":false}
+            """);
+
+        String descriptions = "SELECT description FROM game ORDER BY steam_app_id";
+
+        // when
+        steamStoreCollector.collectAll(SLOT, 2);
+        List<String> initial = jdbcTemplate.queryForList(descriptions, String.class);
+        steamStoreCollector.collectPurchaseOptions(List.of(301L, 302L, 303L), SLOT.plusSeconds(1));
+        steamStoreCollector.collectPurchaseOptions(List.of(301L, 302L), SLOT.plusSeconds(2));
+
+        // then
+        assertThat(initial).containsExactly("첫 소개", "기존 소개", null);
+        assertThat(jdbcTemplate.queryForList(descriptions, String.class))
+            .containsExactly("수정된 소개", "기존 소개", null);
+        mockRestServiceServer.verify();
+    }
+
+    @Test
+    @DisplayName("본편 출시 일정의 공개 범위와 한국어 지원이 바뀌면 같은 배치에서 갱신한다")
+    void collectsReleaseAndKoreanSupport() {
+        // given
+        respondWithItems("""
+            {"item_type":0,"id":301,"success":1,
+             "release":{"steam_release_date":1830520800,"is_coming_soon":true,
+                        "coming_soon_display":"date_full"},
+             "supported_languages":[{"elanguage":4,"supported":true,"subtitles":true,
+                                     "full_audio":false}]},
+            {"item_type":0,"id":302,"success":1,"release":{"is_coming_soon":true},
+             "supported_languages":[{"elanguage":0,"supported":true}]}
+            """);
+        respondWithItems("""
+            {"item_type":0,"id":301,"success":1,
+             "release":{"is_coming_soon":true,"custom_release_date_message":"발표 예정"},
+             "supported_languages":[]},
+            {"item_type":0,"id":302,"success":1,"release":{"steam_release_date":1478035243}}
+            """);
+        respondWithItems("""
+            {"item_type":0,"id":301,"success":1,"supported_languages":[{"elanguage":0}]},
+            {"item_type":0,"id":302,"success":15,"visible":false}
+            """);
+
+        String query = """
+            SELECT release_date::text, release_text, coming_soon, korean_support_text
+            FROM game ORDER BY steam_app_id
+            """;
+
+        // when
+        steamStoreCollector.collectAll(SLOT, 2);
+        List<Map<String, Object>> before = jdbcTemplate.queryForList(query);
+        steamStoreCollector.collectPurchaseOptions(List.of(301L, 302L), SLOT.plusSeconds(1));
+
+        List<Map<String, Object>> revised = jdbcTemplate.queryForList(query);
+        steamStoreCollector.collectPurchaseOptions(List.of(301L, 302L), SLOT.plusSeconds(2));
+
+        // then
+        assertThat(before).extracting("release_date", "release_text", "coming_soon",
+                "korean_support_text")
+            .containsExactly(tuple("2028-01-03", null, true, "인터페이스, 자막"),
+                tuple(null, null, true, "미지원"));
+        assertThat(revised)
+            .extracting("release_date", "release_text", "coming_soon", "korean_support_text")
+            .containsExactly(tuple(null, "발표 예정", true, "인터페이스, 자막"),
+                tuple("2016-11-02", null, false, "미지원"));
+        assertThat(jdbcTemplate.queryForList(query))
+            .extracting("release_date", "release_text", "coming_soon", "korean_support_text")
+            .containsExactly(tuple(null, "발표 예정", true, "미지원"),
+                tuple("2016-11-02", null, false, "미지원"));
+        mockRestServiceServer.verify();
+    }
+
+    @Test
     @DisplayName("이미지 미제공·조회 실패·미노출 응답은 저장된 이미지를 보존하고 확인된 가격은 반영한다")
     void preservesImageWhenUnconfirmed() {
         // given

@@ -4,6 +4,7 @@ import static kr.co.pricelog.global.client.steam.enums.SteamPurchaseOptionType.B
 import static kr.co.pricelog.global.client.steam.enums.SteamPurchaseOptionType.PACKAGE;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -25,6 +26,7 @@ import kr.co.pricelog.domain.purchaseoption.repository.PurchaseOptionRepository;
 import kr.co.pricelog.global.client.steam.dto.SteamPrice;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOption;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
+import kr.co.pricelog.global.client.steam.dto.SteamRelease;
 import kr.co.pricelog.global.client.steam.enums.SteamPurchaseOptionType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -87,17 +89,22 @@ public class GamePurchaseOptionService {
                 closedSales);
             boolean currentStoreState = visible && !protectedSale;
             Boolean free = currentStoreState ? result.freeToPlay() : game.getFreeToPlay();
-            String imageUrl = game.getImageUrl();
-            if (currentStoreState && game.getAppType() == SteamAppType.GAME
-                && result.imageUrl() != null) {
-                imageUrl = result.imageUrl();
-            }
+            boolean updateGameDetails = currentStoreState && game.getAppType() == SteamAppType.GAME;
+            String imageUrl = updateGameDetails && result.imageUrl() != null
+                ? result.imageUrl() : game.getImageUrl();
+            String description = updateGameDetails && result.description() != null
+                ? result.description() : game.getDescription();
 
-            if (game.getStoreVisibility() != result.storeVisibility()
-                || !Objects.equals(game.getFreeToPlay(), free)
-                || !Objects.equals(game.getImageUrl(), imageUrl)) {
-                changedGames.add(new GameState(game.getId(), result.storeVisibility(), free,
-                    imageUrl));
+            SteamRelease release = updateGameDetails ? result.release() : null;
+            String koreanSupport = updateGameDetails && result.koreanSupportText() != null
+                ? result.koreanSupportText() : game.getKoreanSupportText();
+            GameState state = new GameState(game.getId(), result.storeVisibility(), free,
+                imageUrl, description, release == null ? game.getReleaseDate() : release.date(),
+                release == null ? game.getReleaseText() : release.text(),
+                release == null ? game.getComingSoon() : Boolean.valueOf(release.comingSoon()),
+                koreanSupport);
+            if (state.differsFrom(game)) {
+                changedGames.add(state);
             }
             if (!visible) {
                 continue;
@@ -206,7 +213,12 @@ public class GamePurchaseOptionService {
                 changedGames.stream().map(GameState::id).toArray(Long[]::new),
                 changedGames.stream().map(s -> s.visibility().name()).toArray(String[]::new),
                 changedGames.stream().map(GameState::free).toArray(Boolean[]::new),
-                changedGames.stream().map(GameState::imageUrl).toArray(String[]::new));
+                changedGames.stream().map(GameState::imageUrl).toArray(String[]::new),
+                changedGames.stream().map(GameState::description).toArray(String[]::new),
+                changedGames.stream().map(GameState::releaseDate).toArray(LocalDate[]::new),
+                changedGames.stream().map(GameState::releaseText).toArray(String[]::new),
+                changedGames.stream().map(GameState::comingSoon).toArray(Boolean[]::new),
+                changedGames.stream().map(GameState::koreanSupport).toArray(String[]::new));
         }
     }
 
@@ -265,7 +277,20 @@ public class GamePurchaseOptionService {
             slotAt, observedAt);
     }
 
-    private record GameState(long id, StoreVisibility visibility, Boolean free, String imageUrl) {}
+    private record GameState(long id, StoreVisibility visibility, Boolean free, String imageUrl,
+                             String description, LocalDate releaseDate, String releaseText,
+                             Boolean comingSoon, String koreanSupport) {
+        boolean differsFrom(Game game) {
+            return visibility != game.getStoreVisibility()
+                || !Objects.equals(free, game.getFreeToPlay())
+                || !Objects.equals(imageUrl, game.getImageUrl())
+                || !Objects.equals(description, game.getDescription())
+                || !Objects.equals(releaseDate, game.getReleaseDate())
+                || !Objects.equals(releaseText, game.getReleaseText())
+                || !Objects.equals(comingSoon, game.getComingSoon())
+                || !Objects.equals(koreanSupport, game.getKoreanSupportText());
+        }
+    }
 
     private record PurchaseOptionKey(SteamPurchaseOptionType type, long steamId) {}
 

@@ -34,6 +34,12 @@
 
 본편은 같은 요청에 `include_assets=true`를 보내고, 응답의 `assets.asset_url_format`에 있는 `${FILENAME}`을 기본 파일명 `assets.header`로 치환해 Steam CDN 주소를 만든다. 기본 파일명이 없거나 비어 있을 때만 `assets.header_2x`를 사용한다. 이 주소를 `game.image_url`에 저장한다. 두 헤더가 모두 없거나 한국 상점에서 확인되지 않으면 마지막 이미지를 보존한다. 이미 전수를 마친 DB에서는 각 본편의 상점 응답을 다시 받을 때부터 채워진다.
 
+같은 본편 배치에서 `include_basic_info=true`로 요청해 `basic_info.short_description`에 내용이 있을 때 `game.description`을 갱신한다. 한국어로 요청하되 Steam이 반환한 원문을 보존한다. 설명이 누락되거나 공백이면 마지막 값을 유지하며, 한 번도 확인되지 않았다면 `NULL`이다. 이미 전수를 마친 DB에서는 다음 상점 조회 대상이 된 본편부터 채워진다.
+
+같은 배치에서 `include_release`와 `include_supported_languages`도 요청한다. `release_date`는 Steam 출시 시각을 한국 시간으로 환산한 달력 날짜다. 출시 예정 게임은 공개 형식이 `date_full`일 때만 날짜를 저장한다. 월·분기·연도만 공개하면 그 단위의 문구를, 사용자 지정 문구가 있으면 원문을 `release_text`에 저장한다. 날짜를 철회하면 기존 날짜도 비운다. `coming_soon`은 원천의 출시 예정 표시이며 현재 날짜로 추정하지 않는다. 출시 정보 전체가 누락되면 이전 값을 유지한다. 공개 상점 문구와 한국 시간 달력 날짜는 하루 차이 날 수 있다. Dota 2의 한국어 상점 표본에는 2013년 7월 9일로 표시됐고, Steam 출시 시각을 한국 시간으로 환산하면 7월 10일이다. [Steam 출시일 공개 형식](https://partner.steamgames.com/doc/store/release_dates)
+
+언어 목록의 한국어 항목(`elanguage=4`)에서 인터페이스·자막·음성을 읽어 `korean_support_text`에 저장한다. 목록은 있지만 한국어 지원이 없으면 ‘미지원’, 목록을 확인하지 못하면 이전 값을 유지한다. 출시와 언어는 각각 독립적으로 갱신한다.
+
 기본 지정이 생략되면 전체 목록을 반환하고 `bestPurchaseOption`은 `null`이다. 옵션이 하나인 경우에도 같다. Steam이 기본값을 지정했는데 같은 종류·ID의 항목이 없거나 둘 이상이면 조회가 실패한다. 앱의 무료 표기와 각 상품의 종류·ID·이름·확인된 가격을 읽는다.
 
 ## 게임별 구매 옵션 저장

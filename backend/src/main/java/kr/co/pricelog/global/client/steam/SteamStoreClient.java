@@ -37,7 +37,9 @@ public class SteamStoreClient {
 
     private static final String PURCHASE_OPTIONS_QUERY = """
         {"ids":[%s],"context":{"country_code":"KR","language":"koreana"},
-         "data_request":{"include_all_purchase_options":true,"include_assets":true}}
+         "data_request":{
+          "include_all_purchase_options":true,"include_assets":true,"include_basic_info":true,
+          "include_release":true,"include_supported_languages":true}}
         """;
 
     private final RestClient restClient;
@@ -124,11 +126,16 @@ public class SteamStoreClient {
         if (item.success() == ACCESS_DENIED && (regionRestricted || hidden)) {
             StoreVisibility visibility = regionRestricted
                 ? StoreVisibility.REGION_RESTRICTED : StoreVisibility.HIDDEN;
-            return Optional.of(new SteamPurchaseOptions(List.of(), null, null, visibility, null));
+            return Optional.of(new SteamPurchaseOptions(List.of(), null, null, visibility,
+                null, null, null, null));
         }
         if (item.success() == SUCCESS && !regionRestricted && !hidden) {
+            String description = item.basicInfo() == null ? null
+                : SteamGameDetailsMapper.textOrNull(item.basicInfo().path("short_description"));
             return Optional.of(new SteamPurchaseOptions(item.options(), item.bestPurchaseOption(),
-                item.freeToPlay(), StoreVisibility.VISIBLE, headerImageUrl(item.assets())));
+                item.freeToPlay(), StoreVisibility.VISIBLE, headerImageUrl(item.assets()),
+                description, SteamGameDetailsMapper.release(item.release()),
+                SteamGameDetailsMapper.koreanSupport(item.supportedLanguages())));
         }
         return Optional.empty();
     }

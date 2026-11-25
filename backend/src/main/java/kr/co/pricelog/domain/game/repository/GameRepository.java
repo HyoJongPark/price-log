@@ -1,6 +1,7 @@
 package kr.co.pricelog.domain.game.repository;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 import kr.co.pricelog.domain.game.entity.Game;
@@ -20,13 +21,21 @@ public interface GameRepository extends Repository<Game, Long> {
     @Modifying
     @Query(value = """
         UPDATE game g SET store_visibility = s.visibility, is_free = s.free,
-            image_url = s.image_url, updated_at = CURRENT_TIMESTAMP
+            image_url = s.image_url, description = s.description, release_date = s.release_date,
+            release_text = s.release_text, coming_soon = s.coming_soon,
+            korean_support_text = s.korean_support, updated_at = CURRENT_TIMESTAMP
         FROM unnest(CAST(:ids AS bigint[]), CAST(:visibility AS text[]),
-                    CAST(:free AS boolean[]), CAST(:imageUrls AS text[]))
-             AS s(id, visibility, free, image_url)
+                    CAST(:free AS boolean[]), CAST(:imageUrls AS text[]),
+                    CAST(:descriptions AS text[]), CAST(:releaseDates AS date[]),
+                    CAST(:releaseTexts AS text[]), CAST(:comingSoon AS boolean[]),
+                    CAST(:koreanSupport AS text[]))
+             AS s(id, visibility, free, image_url, description, release_date, release_text,
+                  coming_soon, korean_support)
         WHERE g.id = s.id AND g.deleted_at IS NULL
         """, nativeQuery = true)
-    void updateStoreStates(Long[] ids, String[] visibility, Boolean[] free, String[] imageUrls);
+    void updateStoreStates(Long[] ids, String[] visibility, Boolean[] free, String[] imageUrls,
+                           String[] descriptions, LocalDate[] releaseDates, String[] releaseTexts,
+                           Boolean[] comingSoon, String[] koreanSupport);
 
     /** 같은 앱이 겹치면 목록에서 얻은 필드만 갱신한다. */
     @Modifying

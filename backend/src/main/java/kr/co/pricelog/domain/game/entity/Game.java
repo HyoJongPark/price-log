@@ -8,6 +8,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import java.time.Instant;
+import java.time.LocalDate;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.domain.game.enums.StoreVisibility;
 import kr.co.pricelog.global.entity.BaseEntity;
@@ -41,6 +42,16 @@ public class Game extends BaseEntity {
     private Boolean freeToPlay;
 
     private String imageUrl;
+
+    private String description;
+
+    private LocalDate releaseDate;
+
+    private String releaseText;
+
+    private Boolean comingSoon;
+
+    private String koreanSupportText;
 
     @Enumerated(EnumType.STRING)
     private StoreVisibility storeVisibility;
