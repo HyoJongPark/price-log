@@ -20,7 +20,7 @@ pricelog:
   collection:
     daily:
       enabled: true
-      batch-size: 260
+      batch-size: 250
 
 resilience4j:
   retry:
