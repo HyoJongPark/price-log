@@ -17,6 +17,7 @@ import kr.co.pricelog.global.client.steam.constants.SteamApiConstants;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
 import kr.co.pricelog.global.client.steam.dto.SteamStoreItem;
 import kr.co.pricelog.global.client.steam.dto.SteamStoreResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -25,6 +26,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 /** Steam 한국 상점에서 구매할 수 있는 상품을 조회한다. */
+@Slf4j
 @Component
 public class SteamStoreClient {
 
@@ -121,7 +123,7 @@ public class SteamStoreClient {
             .body(SteamStoreResponse.class);
 
         if (result == null || result.response() == null || result.response().items() == null) {
-            throw new RestClientException("Steam 상점의 앱 조회 결과가 누락되었습니다");
+            throw new SteamResponseException("Steam 상점의 앱 조회 결과가 누락되었습니다");
         }
         Map<Long, List<JsonNode>> itemsById = result.response().items().stream()
             .filter(item -> item != null && item.path("id").isIntegralNumber()
@@ -168,11 +170,12 @@ public class SteamStoreClient {
     }
 
     private Optional<SteamPurchaseOptions> readPurchaseOptions(JsonNode rawItem) {
-        // TODO: 로깅 도입 시 제외된 앱 ID와 Steam 결과 코드·누락·중복·해석 실패 사유를 기록한다.
         try {
             SteamStoreItem item = objectMapper.treeToValue(rawItem, SteamStoreItem.class);
             return confirmedPurchaseOptions(item);
-        } catch (JsonProcessingException | RestClientException ignored) {
+        } catch (JsonProcessingException | RestClientException failure) {
+            log.warn("상점 응답 해석 실패. 앱 {}, 사유 {}", rawItem.path("id").asLong(),
+                SteamResponseException.reasonForLog(failure));
             return Optional.empty();
         }
     }

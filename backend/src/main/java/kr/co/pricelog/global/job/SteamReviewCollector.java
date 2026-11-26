@@ -10,6 +10,7 @@ import java.util.Map;
 import kr.co.pricelog.domain.review.dto.CollectedReviews;
 import kr.co.pricelog.domain.review.dto.ReviewCollectionTarget;
 import kr.co.pricelog.domain.review.service.ReviewHistoryService;
+import kr.co.pricelog.global.client.steam.SteamResponseException;
 import kr.co.pricelog.global.client.steam.SteamReviewClient;
 import kr.co.pricelog.global.client.steam.dto.SteamReviewCounts;
 import kr.co.pricelog.global.client.steam.dto.SteamReviewWindow;
@@ -62,7 +63,7 @@ public class SteamReviewCollector {
                 throw limited;
             } catch (RestClientException failure) {
                 log.warn("Steam 구매자 평가 미수집. 앱 {}, 시작일 {}, 사유 {}",
-                    target.steamAppId(), start, failure.getMessage());
+                    target.steamAppId(), start, SteamResponseException.reasonForLog(failure));
                 continue;
             }
 

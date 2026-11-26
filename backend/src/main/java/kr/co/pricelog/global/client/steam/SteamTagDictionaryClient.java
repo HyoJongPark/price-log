@@ -12,7 +12,6 @@ import kr.co.pricelog.global.client.steam.dto.SteamTagDictionary;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
 /** 한국어 태그 사전의 버전을 확인하고 변경된 사전 전체를 읽는다. */
 @Component
@@ -39,7 +38,7 @@ public class SteamTagDictionaryClient {
             query.toString()).retrieve().body(JsonNode.class);
         JsonNode response = body == null ? null : body.get("response");
         if (response == null || !response.isObject()) {
-            throw new RestClientException("Steam 태그 사전 응답이 누락되었습니다");
+            throw new SteamResponseException("Steam 태그 사전 응답이 누락되었습니다");
         }
         if (versionHash != null && response.isEmpty()) {
             return Optional.empty();
@@ -48,7 +47,7 @@ public class SteamTagDictionaryClient {
         String version = response.path("version_hash").textValue();
         JsonNode tags = response.path("tags");
         if (!StringUtils.hasText(version) || !tags.isArray() || tags.isEmpty()) {
-            throw new RestClientException("Steam 태그 사전 버전 또는 목록이 누락되었습니다");
+            throw new SteamResponseException("Steam 태그 사전 버전 또는 목록이 누락되었습니다");
         }
         Map<Long, String> names = new LinkedHashMap<>();
         for (JsonNode tag : tags) {
@@ -56,7 +55,7 @@ public class SteamTagDictionaryClient {
             String name = tag.path("name").textValue();
             if (!id.isIntegralNumber() || !id.canConvertToLong() || id.longValue() <= 0
                 || !StringUtils.hasText(name) || names.putIfAbsent(id.longValue(), name) != null) {
-                throw new RestClientException("Steam 태그 사전에 유효하지 않은 항목이 있습니다");
+                throw new SteamResponseException("Steam 태그 사전에 유효하지 않은 항목이 있습니다");
             }
         }
         return Optional.of(new SteamTagDictionary(version, Map.copyOf(names)));

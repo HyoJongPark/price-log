@@ -15,7 +15,6 @@ import kr.co.pricelog.global.client.steam.dto.SteamReviewCounts;
 import kr.co.pricelog.global.client.steam.dto.SteamReviewWindow;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
 /** 한국 작성일 하루의 Steam 구매자 평가를 모든 언어에서 집계한다. */
 @Component
@@ -52,13 +51,13 @@ public class SteamReviewClient {
         JsonNode reviews = response.path("reviews");
         if (summary.totalCount() == 0) {
             if (reviews.isArray() && !reviews.isEmpty()) {
-                throw new RestClientException("0건 집계에 Steam 평가가 포함되었습니다");
+                throw new SteamResponseException("0건 집계에 Steam 평가가 포함되었습니다");
             }
             return new SteamReviewWindow(0, start, Map.of());
         }
         if (!reviews.isArray() || reviews.isEmpty() || reviews.size() > summary.totalCount()
             || reviews.size() != count(response.path("query_summary"), "num_reviews")) {
-            throw new RestClientException("Steam 구매자 평가 목록과 건수가 일치하지 않습니다");
+            throw new SteamResponseException("Steam 구매자 평가 목록과 건수가 일치하지 않습니다");
         }
 
         Map<LocalDate, SteamReviewCounts> counts = new HashMap<>();
@@ -71,12 +70,12 @@ public class SteamReviewClient {
             if (id.isBlank() || !ids.add(id) || !timestamp.isIntegralNumber()
                 || !timestamp.canConvertToLong() || timestamp.longValue() < 0
                 || timestamp.longValue() > 0xffff_ffffL || !review.path("voted_up").isBoolean()) {
-                throw new RestClientException("Steam 평가 식별자 또는 작성 정보가 유효하지 않습니다");
+                throw new SteamResponseException("Steam 평가 식별자 또는 작성 정보가 유효하지 않습니다");
             }
             LocalDate day = Instant.ofEpochSecond(timestamp.longValue()).atZone(SEOUL)
                 .toLocalDate();
             if (day.isBefore(start) || day.isAfter(oldest)) {
-                throw new RestClientException("Steam 평가의 작성일 범위 또는 순서가 다릅니다");
+                throw new SteamResponseException("Steam 평가의 작성일 범위 또는 순서가 다릅니다");
             }
             oldest = day;
             int vote = review.get("voted_up").booleanValue() ? 1 : 0;
@@ -88,7 +87,7 @@ public class SteamReviewClient {
 
         if (positive > summary.positiveCount()
             || reviews.size() - positive > summary.totalCount() - summary.positiveCount()) {
-            throw new RestClientException("Steam 평가 목록과 긍정·부정 건수가 일치하지 않습니다");
+            throw new SteamResponseException("Steam 평가 목록과 긍정·부정 건수가 일치하지 않습니다");
         }
         if (reviews.size() == summary.totalCount()) {
             return new SteamReviewWindow(summary.totalCount(), start, counts);
@@ -109,7 +108,7 @@ public class SteamReviewClient {
             .uri("/IUserReviewsService/GetAppReviews/v1/?input_json={q}", query)
             .retrieve().body(JsonNode.class);
         if (body == null) {
-            throw new RestClientException("Steam 구매자 평가 응답이 비어 있습니다");
+            throw new SteamResponseException("Steam 구매자 평가 응답이 비어 있습니다");
         }
         return body.path("response");
     }
@@ -120,7 +119,7 @@ public class SteamReviewClient {
         int negative = count(summary, "total_negative");
         int total = count(summary, "total_reviews");
         if ((long) positive + negative != total || total != count(response, "total_matching")) {
-            throw new RestClientException("Steam 구매자 평가 합계가 일치하지 않습니다");
+            throw new SteamResponseException("Steam 구매자 평가 합계가 일치하지 않습니다");
         }
         return new SteamReviewCounts(positive, total);
     }
@@ -128,7 +127,7 @@ public class SteamReviewClient {
     private static int count(JsonNode node, String field) {
         JsonNode value = node.path(field);
         if (!value.isInt() || value.intValue() < 0) {
-            throw new RestClientException("Steam 구매자 평가 건수를 확인할 수 없습니다: " + field);
+            throw new SteamResponseException("Steam 구매자 평가 건수를 확인할 수 없습니다: " + field);
         }
         return value.intValue();
     }

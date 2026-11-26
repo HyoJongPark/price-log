@@ -14,7 +14,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
 /** Steam Web API에서 본편 또는 DLC 목록을 한 페이지씩 조회한다. */
 @Component
@@ -69,7 +68,7 @@ public class SteamAppListClient {
             .body(SteamAppListResponse.class);
 
         if (result == null || result.response() == null) {
-            throw new RestClientException("Steam 목록 응답이 누락되었습니다");
+            throw new SteamResponseException("Steam 목록 응답이 누락되었습니다");
         }
         SteamAppList list = result.response();
         return new SteamAppPage(list.apps(), nextCursor(list, lastAppId));
@@ -77,7 +76,7 @@ public class SteamAppListClient {
 
     private OptionalLong nextCursor(SteamAppList list, long previousCursor) {
         if (list.apps().stream().anyMatch(app -> app.appId() <= previousCursor)) {
-            throw new RestClientException("Steam 목록에 요청 커서 이후의 앱이 아닌 항목이 있습니다");
+            throw new SteamResponseException("Steam 목록에 요청 커서 이후의 앱이 아닌 항목이 있습니다");
         }
         if (!list.hasMore()) {
             return OptionalLong.empty();
@@ -85,10 +84,10 @@ public class SteamAppListClient {
 
         Long cursor = list.lastAppId();
         if (cursor == null) {
-            throw new RestClientException("Steam 목록의 다음 페이지 커서가 누락되었습니다");
+            throw new SteamResponseException("Steam 목록의 다음 페이지 커서가 누락되었습니다");
         }
         if (list.apps().isEmpty() || cursor != list.apps().getLast().appId()) {
-            throw new RestClientException("Steam 목록의 커서와 마지막 앱 ID가 일치하지 않습니다");
+            throw new SteamResponseException("Steam 목록의 커서와 마지막 앱 ID가 일치하지 않습니다");
         }
         return OptionalLong.of(cursor);
     }

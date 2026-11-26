@@ -12,7 +12,6 @@ import kr.co.pricelog.global.client.steam.dto.SteamPlayerChart;
 import kr.co.pricelog.global.client.steam.dto.SteamPlayerCount;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
 /** Steam 전 세계 현재 동접 차트를 한 번에 읽는다. */
 @Component
@@ -33,7 +32,7 @@ public class SteamPlayerChartClient {
         JsonNode body = restClient.get().uri("/ISteamChartsService/GetGamesByConcurrentPlayers/v1/")
             .retrieve().body(JsonNode.class);
         if (body == null) {
-            throw new RestClientException("Steam 동접 차트 응답이 비어 있습니다");
+            throw new SteamResponseException("Steam 동접 차트 응답이 비어 있습니다");
         }
 
         JsonNode response = body.path("response");
@@ -41,7 +40,7 @@ public class SteamPlayerChartClient {
             Instant.now().getEpochSecond()));
         JsonNode ranks = response.path("ranks");
         if (!ranks.isArray() || ranks.size() != CHART_SIZE) {
-            throw new RestClientException("Steam 동접 차트 100개 순위를 확인할 수 없습니다");
+            throw new SteamResponseException("Steam 동접 차트 100개 순위를 확인할 수 없습니다");
         }
 
         List<SteamPlayerCount> entries = new ArrayList<>(CHART_SIZE);
@@ -53,7 +52,7 @@ public class SteamPlayerChartClient {
             int players = (int) number(row, "concurrent_in_game", 0, Integer.MAX_VALUE);
             int peakPlayers = (int) number(row, "peak_in_game", 0, Integer.MAX_VALUE);
             if (!appIds.add(appId) || !positions.add(rank)) {
-                throw new RestClientException("Steam 동접 차트에 중복된 앱 또는 순위가 있습니다");
+                throw new SteamResponseException("Steam 동접 차트에 중복된 앱 또는 순위가 있습니다");
             }
             entries.add(new SteamPlayerCount(appId, rank, players, peakPlayers));
         }
@@ -64,7 +63,7 @@ public class SteamPlayerChartClient {
         JsonNode value = row.path(field);
         if (!value.isIntegralNumber() || !value.canConvertToLong()
             || value.longValue() < min || value.longValue() > max) {
-            throw new RestClientException("Steam 동접 차트의 숫자 필드를 확인할 수 없습니다: " + field);
+            throw new SteamResponseException("Steam 동접 차트의 숫자 필드를 확인할 수 없습니다: " + field);
         }
         return value.longValue();
     }

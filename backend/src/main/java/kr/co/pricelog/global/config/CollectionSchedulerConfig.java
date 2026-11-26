@@ -1,5 +1,7 @@
 package kr.co.pricelog.global.config;
 
+import kr.co.pricelog.global.client.steam.SteamResponseException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -7,6 +9,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /** 카탈로그·가격, 리뷰, 동접 차트가 각각의 일정에 따라 수집되도록 실행 스레드를 분리한다. */
+@Slf4j
 @Configuration
 @ConditionalOnProperty(name = "pricelog.collection.daily.enabled", havingValue = "true")
 public class CollectionSchedulerConfig {
@@ -30,6 +33,11 @@ public class CollectionSchedulerConfig {
     private ThreadPoolTaskScheduler scheduler(String prefix) {
         ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
         scheduler.setThreadNamePrefix(prefix);
+        scheduler.setErrorHandler(CollectionSchedulerConfig::logFailure);
         return scheduler;
+    }
+
+    private static void logFailure(Throwable failure) {
+        log.error("수집 작업 실패. 사유 {}", SteamResponseException.reasonForLog(failure));
     }
 }
