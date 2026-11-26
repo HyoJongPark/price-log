@@ -7,11 +7,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import kr.co.pricelog.domain.collection.dto.SteamPriceCollectionPlan;
+import kr.co.pricelog.domain.collection.enums.PipelineType;
 import kr.co.pricelog.domain.collection.service.SteamPriceCollectionService;
 import kr.co.pricelog.global.client.steam.SteamStoreClient;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 
@@ -39,12 +41,16 @@ public class SteamStoreCollector {
     @Retry(name = "steamCollection")
     public void collectAll(Instant now, int batchSize) {
         Assert.isTrue(batchSize > 0, "가격 수집 묶음 크기는 양수여야 합니다");
+        MDC.put("collectionTask", "[STEAM_PRICE] 가격 수집");
         steamPriceCollectionService.openFullCollection(now)
-            .ifPresent(plan -> collectPrices(plan, batchSize));
+            .ifPresent(plan -> collectPrices(PipelineType.STEAM_PRICE, plan, batchSize));
     }
 
     /** 변경분과 전수 회차가 동일한 상점 조회·저장·실패 복구 경로를 사용한다. */
-    void collectPrices(SteamPriceCollectionPlan plan, int batchSize) {
+    void collectPrices(PipelineType pipelineType, SteamPriceCollectionPlan plan, int batchSize) {
+        MDC.put("collectionTask", "[" + pipelineType + "] 가격 수집 runId=" + plan.executionId());
+        log.info("[{}] 가격 수집 시작. runId={} targetApps={} startIndex={}", pipelineType,
+            plan.executionId(), plan.targetIds().size(), plan.nextIndex());
         boolean allConfirmed;
         try {
             allConfirmed = collectRemaining(plan, batchSize);
@@ -55,9 +61,10 @@ public class SteamStoreCollector {
 
         if (allConfirmed) {
             steamPriceCollectionService.complete(plan.executionId());
+            log.info("[{}] 가격 수집 종료. runId={}", pipelineType, plan.executionId());
         } else {
             steamPriceCollectionService.markFailed(plan.executionId());
-            log.warn("가격 재조회 후에도 미수집 앱이 남았습니다. 회차 {}", plan.executionId());
+            log.warn("[{}] 가격 재조회 후에도 미수집 앱이 남았습니다. runId={}", pipelineType, plan.executionId());
         }
     }
 

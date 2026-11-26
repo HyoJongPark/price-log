@@ -8,16 +8,20 @@ import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Set;
 import kr.co.pricelog.domain.collection.dto.SteamChangeListPlan;
+import kr.co.pricelog.domain.collection.enums.PipelineType;
 import kr.co.pricelog.domain.collection.service.SteamPriceCollectionService;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.domain.game.service.GameCatalogService;
 import kr.co.pricelog.global.client.steam.SteamAppListClient;
 import kr.co.pricelog.global.client.steam.dto.SteamAppPage;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 
 /** 변경된 본편·DLC를 카탈로그에 반영하고 두 종류의 한국 구매 옵션을 다시 확인한다. */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class SteamAppChangeCollector {
@@ -34,20 +38,27 @@ public class SteamAppChangeCollector {
     @Retry(name = "steamCollection")
     public void collect(Instant slotAt, int batchSize) {
         Assert.isTrue(batchSize > 0, "가격 수집 묶음 크기는 양수여야 합니다");
+        MDC.put("collectionTask", "[STEAM_CHANGED_APPS] 변경 수집");
         SteamChangeListPlan changeList = steamPriceCollectionService.startChangeList(slotAt);
-        if (changeList.modifiedSince().isPresent()) {
-            try {
-                Set<Long> gameIds = readChangedApps(changeList.modifiedSince().get());
-                steamPriceCollectionService.setChangedPriceTargets(changeList.executionId(), slotAt,
-                    gameIds);
-            } catch (RuntimeException failure) {
-                steamPriceCollectionService.markFailed(changeList.executionId());
-                throw failure;
-            }
-        }
+        MDC.put("collectionTask", "[STEAM_CHANGED_APPS] 변경 수집 runId=" + changeList.executionId());
+        changeList.modifiedSince().ifPresent(since ->
+            collectChangeList(changeList.executionId(), slotAt, since));
 
         steamPriceCollectionService.resumePriceCollection(changeList.executionId())
-            .ifPresent(plan -> steamStoreCollector.collectPrices(plan, batchSize));
+            .ifPresent(plan -> steamStoreCollector.collectPrices(PipelineType.STEAM_CHANGED_APPS,
+                plan, batchSize));
+    }
+
+    private void collectChangeList(long executionId, Instant slotAt, Instant modifiedSince) {
+        log.info("[STEAM_CHANGED_APPS] 변경 목록 수집 시작. runId={}", executionId);
+        try {
+            Set<Long> gameIds = readChangedApps(modifiedSince);
+            steamPriceCollectionService.setChangedPriceTargets(executionId, slotAt, gameIds);
+        } catch (RuntimeException failure) {
+            steamPriceCollectionService.markFailed(executionId);
+            throw failure;
+        }
+        log.info("[STEAM_CHANGED_APPS] 변경 목록 수집 종료. runId={}", executionId);
     }
 
     private Set<Long> readChangedApps(Instant modifiedSince) {

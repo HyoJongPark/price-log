@@ -2,6 +2,7 @@ package kr.co.pricelog.global.config;
 
 import kr.co.pricelog.global.client.steam.SteamResponseException;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,11 +34,21 @@ public class CollectionSchedulerConfig {
     private ThreadPoolTaskScheduler scheduler(String prefix) {
         ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
         scheduler.setThreadNamePrefix(prefix);
+        // 같은 스레드가 다음 예약 작업을 실행할 때 이전 회차의 로그 문맥을 넘기지 않는다.
+        scheduler.setTaskDecorator(task -> () -> {
+            try {
+                task.run();
+            } finally {
+                MDC.remove("collectionTask");
+            }
+        });
         scheduler.setErrorHandler(CollectionSchedulerConfig::logFailure);
         return scheduler;
     }
 
     private static void logFailure(Throwable failure) {
-        log.error("수집 작업 실패. 사유 {}", SteamResponseException.reasonForLog(failure));
+        String task = MDC.get("collectionTask");
+        log.error("{} 실패. reason={}", task == null ? "수집 작업" : task,
+            SteamResponseException.reasonForLog(failure));
     }
 }

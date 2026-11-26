@@ -16,6 +16,7 @@ import kr.co.pricelog.global.client.steam.dto.SteamReviewCounts;
 import kr.co.pricelog.global.client.steam.dto.SteamReviewWindow;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
@@ -40,13 +41,20 @@ public class SteamReviewCollector {
         LocalDate end = today.minusDays(1);
         int weekday = today.getDayOfWeek().getValue() - 1;
 
-        long afterId = 0;
-        List<ReviewCollectionTarget> targets;
-        while (!(targets = reviewHistoryService.findDue(weekday, start, end, afterId,
-            TARGET_PAGE_SIZE)).isEmpty()) {
-            collectBatch(targets, start, end);
-            afterId = targets.getLast().gameId();
+        MDC.put("collectionTask", "[STEAM_REVIEW] 구매자 평가 수집");
+        List<ReviewCollectionTarget> targets =
+            reviewHistoryService.findDue(weekday, start, end, 0, TARGET_PAGE_SIZE);
+        if (targets.isEmpty()) {
+            return;
         }
+
+        log.info("[STEAM_REVIEW] 구매자 평가 수집 시작. from={} to={}", start, end);
+        while (!targets.isEmpty()) {
+            collectBatch(targets, start, end);
+            long afterId = targets.getLast().gameId();
+            targets = reviewHistoryService.findDue(weekday, start, end, afterId, TARGET_PAGE_SIZE);
+        }
+        log.info("[STEAM_REVIEW] 구매자 평가 수집 종료");
     }
 
     /** HTTP 대기 중에는 연결을 빌리지 않고, 한 주를 끝까지 확인한 앱만 묶어서 저장한다. */

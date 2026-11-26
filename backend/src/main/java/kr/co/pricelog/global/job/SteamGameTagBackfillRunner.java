@@ -43,13 +43,13 @@ public class SteamGameTagBackfillRunner implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        long cursor = afterAppId;
-        while (true) {
-            List<CatalogGameId> games = gameTagService.findGamesAfter(cursor, batchSize);
-            if (games.isEmpty()) {
-                return;
-            }
+        List<CatalogGameId> games = gameTagService.findGamesAfter(afterAppId, batchSize);
+        if (games.isEmpty()) {
+            return;
+        }
 
+        log.info("[STEAM_TAG_BACKFILL] 태그 보완 시작");
+        while (!games.isEmpty()) {
             List<Long> ids = games.stream().map(CatalogGameId::steamAppId).toList();
             Map<Long, List<Long>> confirmed = steamStoreClient.getGameTags(ids);
             Map<Long, List<Long>> tagsByGame = new HashMap<>();
@@ -60,9 +60,11 @@ public class SteamGameTagBackfillRunner implements CommandLineRunner {
                 }
             }
             gameTagService.saveGameTags(tagsByGame);
-            cursor = ids.getLast();
+            long cursor = ids.getLast();
             log.info("태그 보완 배치 반영. 마지막 Steam 앱 {}, 확인 {}/{}", cursor, confirmed.size(),
                 ids.size());
+            games = gameTagService.findGamesAfter(cursor, batchSize);
         }
+        log.info("[STEAM_TAG_BACKFILL] 태그 보완 종료");
     }
 }

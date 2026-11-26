@@ -5,14 +5,18 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
+import kr.co.pricelog.domain.collection.enums.PipelineType;
 import kr.co.pricelog.domain.collection.service.SteamCatalogCollectionService;
 import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.global.client.steam.SteamAppListClient;
 import kr.co.pricelog.global.client.steam.dto.SteamAppPage;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
 /** Steam 본편과 DLC를 페이지 단위로 수집한다. */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class SteamCatalogCollector {
@@ -26,6 +30,7 @@ public class SteamCatalogCollector {
     /** 최초 적재가 남아 있을 때만 새 목록을 읽거나 저장한 커서에서 이어간다. */
     @Retry(name = "steamCollection")
     public void initialize(Instant now) {
+        MDC.put("collectionTask", "[STEAM_CATALOG] 목록 회차 확인");
         steamCatalogCollectionService.pendingCatalogSlot(now).ifPresent(this::collectAll);
     }
 
@@ -37,8 +42,15 @@ public class SteamCatalogCollector {
     }
 
     private void collectList(SteamAppType type, Instant scheduledAt) {
+        PipelineType pipelineType = PipelineType.forSteamList(type);
+        MDC.put("collectionTask", "[" + pipelineType + "] 목록 수집 slotAt=" + scheduledAt);
         OptionalLong nextCursor = steamCatalogCollectionService.resumeCursor(type, scheduledAt);
+        if (nextCursor.isEmpty()) {
+            return;
+        }
 
+        log.info("[{}] 목록 수집 시작. slotAt={} cursor={}", pipelineType, scheduledAt,
+            nextCursor.getAsLong());
         try {
             while (nextCursor.isPresent()) {
                 SteamAppPage page = steamAppListClient.getPage(type, nextCursor.getAsLong(),
@@ -53,5 +65,6 @@ public class SteamCatalogCollector {
             steamCatalogCollectionService.markFailed(type, scheduledAt);
             throw collectionFailure;
         }
+        log.info("[{}] 목록 수집 종료", pipelineType);
     }
 }
