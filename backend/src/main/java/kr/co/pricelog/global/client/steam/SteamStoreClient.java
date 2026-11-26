@@ -3,8 +3,11 @@ package kr.co.pricelog.global.client.steam;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.resilience4j.retry.annotation.Retry;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,9 +17,11 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import kr.co.pricelog.domain.game.enums.StoreVisibility;
 import kr.co.pricelog.global.client.steam.constants.SteamApiConstants;
+import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOption;
 import kr.co.pricelog.global.client.steam.dto.SteamPurchaseOptions;
 import kr.co.pricelog.global.client.steam.dto.SteamStoreItem;
 import kr.co.pricelog.global.client.steam.dto.SteamStoreResponse;
+import kr.co.pricelog.global.client.steam.enums.SteamPurchaseOptionType;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -154,25 +159,11 @@ public class SteamStoreClient {
             && (restricted.isMissingNode() || restricted.isBoolean());
     }
 
-    private static boolean isVisibleApp(JsonNode item) {
-        return item.path("item_type").asInt(-1) == APP_ITEM_TYPE
-            && item.path("success").asInt() == SUCCESS && item.path("visible").asBoolean(true)
-            && !item.path("unvailable_for_country_restriction").asBoolean();
-    }
-
-    private static Optional<Long> readParentAppId(JsonNode item) {
-        JsonNode parent = item.path("related_items").path("parent_appid");
-        if (!isVisibleApp(item) || !parent.isIntegralNumber() || !parent.canConvertToLong()
-            || parent.longValue() <= 0) {
-            return Optional.empty();
-        }
-        return Optional.of(parent.longValue());
-    }
-
     private Optional<SteamPurchaseOptions> readPurchaseOptions(JsonNode rawItem) {
         try {
             SteamStoreItem item = objectMapper.treeToValue(rawItem, SteamStoreItem.class);
-            return confirmedPurchaseOptions(item);
+            List<SteamPurchaseOption> options = readListedOptions(item.options());
+            return confirmedPurchaseOptions(item, options);
         } catch (JsonProcessingException | RestClientException failure) {
             log.warn("상점 응답 해석 실패. 앱 {}, 사유 {}", rawItem.path("id").asLong(),
                 SteamResponseException.reasonForLog(failure));
@@ -180,7 +171,29 @@ public class SteamStoreClient {
         }
     }
 
-    private static Optional<SteamPurchaseOptions> confirmedPurchaseOptions(SteamStoreItem item) {
+    private List<SteamPurchaseOption> readListedOptions(List<ObjectNode> rows)
+        throws JsonProcessingException {
+        List<SteamPurchaseOption> options = new ArrayList<>(rows.size());
+        Map<OptionKey, ObjectNode> seen = new HashMap<>();
+        for (ObjectNode row : rows) {
+            SteamPurchaseOption option = objectMapper.treeToValue(row, SteamPurchaseOption.class);
+            OptionKey key = new OptionKey(option.type(), option.steamId());
+
+            // 같은 상품이 여러 상점 그룹에 노출될 수 있다. 나머지 원천 필드는 구독 조건까지 비교한다.
+            row.remove("package_group");
+            ObjectNode previous = seen.putIfAbsent(key, row);
+            if (previous == null) {
+                options.add(option);
+            } else if (!previous.equals(row)) {
+                throw new SteamResponseException("구매 옵션 %s %d, 중복 항목의 상품 정보 불일치"
+                    .formatted(key.type(), key.steamId()));
+            }
+        }
+        return options;
+    }
+
+    private static Optional<SteamPurchaseOptions> confirmedPurchaseOptions(
+        SteamStoreItem item, List<SteamPurchaseOption> options) {
         if (!Objects.equals(item.itemType(), APP_ITEM_TYPE)) {
             return Optional.empty();
         }
@@ -197,7 +210,7 @@ public class SteamStoreClient {
         if (item.success() == SUCCESS && !regionRestricted && !hidden) {
             String description = item.basicInfo() == null ? null
                 : SteamGameDetailsMapper.textOrNull(item.basicInfo().path("short_description"));
-            return Optional.of(new SteamPurchaseOptions(item.options(), item.bestPurchaseOption(),
+            return Optional.of(new SteamPurchaseOptions(options, item.bestPurchaseOption(),
                 item.freeToPlay(), StoreVisibility.VISIBLE, headerImageUrl(item.assets()),
                 description, SteamGameDetailsMapper.release(item.release()),
                 SteamGameDetailsMapper.koreanSupport(item.supportedLanguages()),
@@ -222,4 +235,21 @@ public class SteamStoreClient {
 
         return ASSET_BASE_URL + format.replace(FILENAME, header);
     }
+
+    private static Optional<Long> readParentAppId(JsonNode item) {
+        JsonNode parent = item.path("related_items").path("parent_appid");
+        if (!isVisibleApp(item) || !parent.isIntegralNumber() || !parent.canConvertToLong()
+            || parent.longValue() <= 0) {
+            return Optional.empty();
+        }
+        return Optional.of(parent.longValue());
+    }
+
+    private static boolean isVisibleApp(JsonNode item) {
+        return item.path("item_type").asInt(-1) == APP_ITEM_TYPE
+            && item.path("success").asInt() == SUCCESS && item.path("visible").asBoolean(true)
+            && !item.path("unvailable_for_country_restriction").asBoolean();
+    }
+
+    private record OptionKey(SteamPurchaseOptionType type, long steamId) {}
 }

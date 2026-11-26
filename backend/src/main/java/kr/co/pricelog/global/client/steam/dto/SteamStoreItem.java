@@ -2,6 +2,7 @@ package kr.co.pricelog.global.client.steam.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.Collections;
 import java.util.List;
 
@@ -13,7 +14,7 @@ public record SteamStoreItem(long id, int success, @JsonProperty("item_type") In
                              JsonNode release,
                              @JsonProperty("supported_languages") JsonNode supportedLanguages,
                              @JsonProperty("basic_info") JsonNode basicInfo,
-                             @JsonProperty("purchase_options") List<SteamPurchaseOption> options,
+                             @JsonProperty("purchase_options") List<ObjectNode> options,
                              @JsonProperty("visible") Boolean visible,
                              @JsonProperty("unvailable_for_country_restriction")
                              Boolean regionRestricted,

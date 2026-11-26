@@ -175,6 +175,35 @@ class SteamStoreClientTest {
                 .isEqualTo(new SteamPurchaseOption(PACKAGE, 42, null, null));
         }
 
+        @ParameterizedTest
+        @ValueSource(strings = {"default", "CoDPoints"})
+        @DisplayName("같은 패키지가 반복되면 대표 옵션 한 건과 다른 구매 옵션을 순서대로 보존한다")
+        void mergesRepeatedPackage(String secondGroup) {
+            // given
+            respondWithItems("""
+                [{"item_type":0,"id":101,"success":1,"best_purchase_option":{"packageid":823895},
+                  "purchase_options":[
+                    {"packageid":823895,"formatted_final_price":"₩ 2,800",
+                     "package_group":"default"},
+                    {"bundleid":823895},
+                    {"packageid":823895,"formatted_final_price":"₩ 2,800","package_group":"%s"},
+                    {"packageid":42}]}]
+                """.formatted(secondGroup));
+
+            // when
+            SteamPurchaseOptions result = steamStoreClient.getPurchaseOptions(List.of(101L))
+                .get(101L);
+
+            // then
+            assertThat(result).isNotNull();
+            SteamPurchaseOption points = new SteamPurchaseOption(PACKAGE, 823895, null,
+                new SteamPrice(2800L, null, null));
+            assertThat(result.purchaseOptions()).containsExactly(points,
+                new SteamPurchaseOption(BUNDLE, 823895, null, null),
+                new SteamPurchaseOption(PACKAGE, 42, null, null));
+            assertThat(result.bestPurchaseOption()).isEqualTo(points);
+        }
+
         @Test
         @DisplayName("구매 옵션이 하나여도 Steam의 기본 지정이 없으면 선택하지 않는다")
         void keepsSingleOptionWithoutBestSelection() {
@@ -218,10 +247,32 @@ class SteamStoreClientTest {
 
         @ParameterizedTest
         @ValueSource(strings = {
+            "\"formatted_final_price\":\"₩ %d\"",
+            "\"recurrence_info\":{\"renewal_time_period\":%d}",
+            "\"active_discounts\":[{\"discount_end_date\":%d}]"})
+        @DisplayName("대표 지정이 없어도 같은 상품의 가격·구독·할인 조건이 다르면 해당 앱만 제외한다")
+        void rejectsConflictingDuplicate(String term) {
+            // given
+            respondWithItems("""
+                [{"item_type":0,"id":101,"success":1,"purchase_options":[
+                    {"packageid":42,%s},
+                    {"packageid":42,%s}]},
+                 {"item_type":0,"id":102,"success":1}]
+                """.formatted(term.formatted(1), term.formatted(2)));
+
+            // when
+            Map<Long, SteamPurchaseOptions> result = steamStoreClient.getPurchaseOptions(
+                List.of(101L, 102L));
+
+            // then
+            assertThat(result).containsOnlyKeys(102L);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
             "[{\"packageid\":43}]",
-            "[{\"bundleid\":42}]",
-            "[{\"packageid\":42},{\"packageid\":42}]"})
-        @DisplayName("지정한 종류와 ID에 해당하는 구매 옵션이 없거나 여러 건이면 해당 앱을 제외한다")
+            "[{\"bundleid\":42}]"})
+        @DisplayName("지정한 종류와 ID에 해당하는 구매 옵션이 없으면 해당 앱을 제외한다")
         void rejectsUnmatchedBestOption(String options) {
             // given
             respondWithItems("""
