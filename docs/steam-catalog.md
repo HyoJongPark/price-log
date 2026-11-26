@@ -149,3 +149,9 @@ Steam 응답을 받은 뒤 한 묶음의 게임·상품·가격 이력과 진행
 수집 대상은 1,000개씩 읽고, HTTP 응답은 트랜잭션 밖에서 모은다. 쓰기 한 번은 최대 50개 앱·1,000개 일별 행이다. PostgreSQL에서 각 앱의 이전 확인 위치를 대조해 진행 위치를 일괄 갱신하고, 같은 SQL 안에서 해당 앱의 일별 행을 일괄 INSERT한다. 저장에 실패하면 그 청크의 진행 위치도 함께 롤백한다.
 
 [Steam 구매자 평가 API](https://partner.steamgames.com/doc/webapi/IUserReviewsService#GetAppReviews)
+
+## 동시 접속자 차트
+
+수집기는 기동 시 한 번, 이후 매시 00·15·30·45분에 Steam 현재 동접 차트를 한 번 조회한다. 카탈로그와 독립된 스레드에서 실행한다. 응답에 실린 100개 앱의 Steam 앱 번호, 원천 순위, 현재 동접 수(`concurrent_in_game`), Steam 기준 최고 동접 수(`peak_in_game`)를 공통 기준 시각(`last_update`)과 함께 `ccu_history`에 한 번에 저장한다. 카탈로그에 없는 앱과 동접 0명도 보존한다.
+
+같은 판이나 이전 판이 다시 오면 건너뛴다. 응답이 불완전하거나 적재가 실패하면 직전 판을 유지한다. HTTP 429에는 기존 Steam 요청 재시도 정책을 적용하고, 재시도를 소진하면 다음 정기 실행 때 최신 판을 받는다. 수집 이전이나 중단된 시간대는 미관측으로 남는다. 홈은 최신 판 전체를 기준으로 카탈로그를 연결해 미매칭 행의 순위도 보존한다. 상세는 해당 앱의 저장 이력을 읽는다. [홈과 상세의 동접 표시 기준](product.md#홈과-게임-상세의-동접-표시) [Steam 현재 동접 차트](https://api.steampowered.com/ISteamChartsService/GetGamesByConcurrentPlayers/v1/)

@@ -69,6 +69,9 @@ class SteamCollectionSchedulerIntegrationTest {
     @MockitoBean(answers = Answers.CALLS_REAL_METHODS)
     private TaskScheduler reviewTaskScheduler;
 
+    @MockitoBean(answers = Answers.CALLS_REAL_METHODS)
+    private TaskScheduler playerChartTaskScheduler;
+
     @Autowired
     private ScheduledAnnotationBeanPostProcessor scheduling;
 
@@ -108,6 +111,25 @@ class SteamCollectionSchedulerIntegrationTest {
         assertThat(first).isEqualTo(Instant.parse("2026-11-24T02:00:00Z"));
         assertThat(hourly.getTrigger().nextExecution(context))
             .isEqualTo(Instant.parse("2026-11-24T03:00:00Z"));
+    }
+
+    @Test
+    @DisplayName("동접 차트 수집은 기동 호출과 15분 단위 예약을 등록한다")
+    void registersPlayerChartCollection() {
+        // given
+        String method = SteamPlayerChartScheduler.class.getName() + ".collect";
+
+        // when
+        List<Task> tasks = scheduling.getScheduledTasks().stream().map(ScheduledTask::getTask)
+            .filter(task -> task.toString().equals(method)).toList();
+
+        // then
+        assertThat(tasks).hasSize(2);
+        assertThat(tasks).filteredOn(OneTimeTask.class::isInstance).singleElement()
+            .satisfies(task -> assertThat(((OneTimeTask) task).getInitialDelayDuration()).isZero());
+        assertThat(tasks).filteredOn(CronTask.class::isInstance).singleElement()
+            .satisfies(task -> assertThat(((CronTask) task).getExpression())
+                .isEqualTo("0 */15 * * * *"));
     }
 
     @Test

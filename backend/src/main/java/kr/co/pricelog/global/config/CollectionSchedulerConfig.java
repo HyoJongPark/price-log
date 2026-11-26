@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
-/** 리뷰의 장시간 HTTP 대기가 기존 단일 카탈로그·가격 스레드를 점유하지 않게 한다. */
+/** 카탈로그·가격, 리뷰, 동접 차트가 각각의 일정에 따라 수집되도록 실행 스레드를 분리한다. */
 @Configuration
 @ConditionalOnProperty(name = "pricelog.collection.daily.enabled", havingValue = "true")
 public class CollectionSchedulerConfig {
@@ -20,6 +20,11 @@ public class CollectionSchedulerConfig {
     @Bean
     ThreadPoolTaskScheduler reviewTaskScheduler() {
         return scheduler("review-collection-");
+    }
+
+    @Bean
+    ThreadPoolTaskScheduler playerChartTaskScheduler() {
+        return scheduler("player-chart-");
     }
 
     private ThreadPoolTaskScheduler scheduler(String prefix) {

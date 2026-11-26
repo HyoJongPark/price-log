@@ -15,6 +15,7 @@ import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 import kr.co.pricelog.domain.game.service.GameCatalogService;
 import kr.co.pricelog.global.client.steam.SteamAppListClient;
+import kr.co.pricelog.global.client.steam.SteamPlayerChartClient;
 import kr.co.pricelog.global.client.steam.SteamReviewClient;
 import kr.co.pricelog.global.client.steam.SteamTagDictionaryClient;
 import kr.co.pricelog.global.client.steam.dto.SteamApp;
@@ -60,6 +61,9 @@ class SteamPriceRecoveryIntegrationTest {
 
     @MockitoBean
     private SteamAppListClient steamAppListClient;
+
+    @MockitoBean
+    private SteamPlayerChartClient steamPlayerChartClient;
 
     @MockitoBean
     private SteamReviewClient steamReviewClient;
