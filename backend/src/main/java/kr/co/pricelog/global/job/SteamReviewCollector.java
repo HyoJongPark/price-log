@@ -19,128 +19,77 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
 
-/** 본편·DLC의 최초 1년과 담당 요일까지의 미수집 작성일을 같은 경로로 적재한다. */
+/** 담당 요일의 본편·DLC에서 지난 7일의 구매자 평가를 적재한다. */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class SteamReviewCollector {
 
     private static final int TARGET_PAGE_SIZE = 1_000;
-    private static final int APPS_PER_BATCH = 50;
+    private static final int APPS_PER_BATCH = 250;
     private static final int ROWS_PER_BATCH = 1_000;
-    private static final int TARGET_REVIEWS_PER_CHECKPOINT = 7 * SteamReviewClient.REVIEWS_PER_PAGE;
-    private static final int MIN_DAYS_PER_CHECKPOINT = 7;
 
     private final SteamReviewClient steamReviewClient;
     private final ReviewHistoryService reviewHistoryService;
 
-    /** 이미 추적 중인 앱의 밀린 날짜를 먼저 처리한 뒤 새 앱의 1년치를 채운다. */
+    /** 월요일을 0으로 잡고 앱 번호를 7로 나눈 나머지에 해당하는 본편·DLC만 읽는다. */
     @Retry(name = "steamCollection")
     public void collectDue(LocalDate today) {
-        long afterId = 0;
-        Long lastId;
-        while ((lastId = reviewHistoryService.registerBatch(today, afterId, TARGET_PAGE_SIZE))
-            != null) {
-            afterId = lastId;
-        }
+        LocalDate start = today.minusWeeks(1);
+        LocalDate end = today.minusDays(1);
+        int weekday = today.getDayOfWeek().getValue() - 1;
 
-        collectDue(today, false);
-        collectDue(today, true);
-    }
-
-    private void collectDue(LocalDate today, boolean initial) {
         long afterId = 0;
         List<ReviewCollectionTarget> targets;
-        while (!(targets = reviewHistoryService.findDue(today, initial, afterId, TARGET_PAGE_SIZE))
-            .isEmpty()) {
-            collectBatch(targets, today);
+        while (!(targets = reviewHistoryService.findDue(weekday, start, end, afterId,
+            TARGET_PAGE_SIZE)).isEmpty()) {
+            collectBatch(targets, start, end);
             afterId = targets.getLast().gameId();
         }
     }
 
-    /** 앱 수와 실제 리뷰 행 수 모두 제한한다. HTTP 대기 중에는 DB 연결을 점유하지 않는다. */
-    void collectBatch(List<ReviewCollectionTarget> targets, LocalDate today) {
+    /** HTTP 대기 중에는 연결을 빌리지 않고, 한 주를 끝까지 확인한 앱만 묶어서 저장한다. */
+    private void collectBatch(List<ReviewCollectionTarget> targets, LocalDate start,
+                              LocalDate end) {
         List<CollectedReviews> batch = new ArrayList<>();
+        int rows = 0;
         for (ReviewCollectionTarget target : targets) {
+            Map<LocalDate, SteamReviewCounts> counts;
             try {
-                collectTarget(target, today, batch);
+                counts = readPeriod(target.steamAppId(), start, end);
             } catch (HttpClientErrorException.TooManyRequests limited) {
-                savePending(batch);
+                savePending(batch, start, end);
                 throw limited;
             } catch (RestClientException failure) {
                 log.warn("Steam 구매자 평가 미수집. 앱 {}, 시작일 {}, 사유 {}",
-                    target.steamAppId(), target.startDate(), failure.getMessage());
+                    target.steamAppId(), start, failure.getMessage());
+                continue;
             }
+
+            if (rows + counts.size() > ROWS_PER_BATCH || batch.size() == APPS_PER_BATCH) {
+                savePending(batch, start, end);
+                batch.clear();
+                rows = 0;
+            }
+            batch.add(new CollectedReviews(target.gameId(), counts));
+            rows += counts.size();
         }
-        savePending(batch);
+        savePending(batch, start, end);
     }
 
-    private void addToBatch(List<CollectedReviews> batch, CollectedReviews result) {
-        int rows = batch.stream().mapToInt(app -> app.counts().size()).sum();
-        if (rows + result.counts().size() > ROWS_PER_BATCH || batch.size() == APPS_PER_BATCH) {
-            savePending(batch);
-        }
-        batch.add(result);
-    }
-
-    private void savePending(List<CollectedReviews> batch) {
+    private void savePending(List<CollectedReviews> batch, LocalDate start, LocalDate end) {
         if (!batch.isEmpty()) {
-            reviewHistoryService.saveBatch(batch);
-            batch.clear();
+            reviewHistoryService.saveBatch(batch, start, end);
         }
-    }
-
-    private void collectTarget(ReviewCollectionTarget target, LocalDate today,
-                               List<CollectedReviews> batch) {
-        LocalDate due = target.dueOn();
-        LocalDate latestSlot = due.plusWeeks(ChronoUnit.WEEKS.between(due, today));
-        LocalDate start = target.startDate();
-        LocalDate lastDay = latestSlot.minusDays(1);
-        LocalDate end = lastDay.isAfter(start.plusDays(365)) ? start.plusYears(1).minusDays(1)
-            : lastDay;
-        long appId = target.steamAppId();
-        long days = ChronoUnit.DAYS.between(start, end) + 1;
-        SteamReviewWindow first = days == 1 ? null : steamReviewClient.getReviewWindow(appId,
-            start, end);
-
-        long span = daysPerCheckpoint(start, days, first);
-        while (!start.isAfter(end)) {
-            LocalDate until = start.plusDays(span - 1);
-            if (until.isAfter(end)) {
-                until = end;
-            }
-            Map<LocalDate, SteamReviewCounts> counts = readPeriod(appId, start, until,
-                span == days ? first : null);
-            LocalDate nextDue = until.equals(lastDay) ? latestSlot.plusWeeks(1) : due;
-            addToBatch(batch, new CollectedReviews(target.gameId(), start, until, nextDue,
-                counts));
-            if (until.isBefore(end)) {
-                savePending(batch);
-            }
-            start = until.plusDays(1);
-        }
-    }
-
-    /** 밀집 구간은 목표 리뷰 수에 맞춰 나누되 짧은 조회 구간은 한 번에 처리한다. */
-    private static long daysPerCheckpoint(LocalDate start, long days, SteamReviewWindow first) {
-        if (days <= MIN_DAYS_PER_CHECKPOINT || first == null || !first.completeFrom().isAfter(start)
-            || first.totalMatching() <= TARGET_REVIEWS_PER_CHECKPOINT) {
-            return days;
-        }
-
-        long estimatedDays = days * TARGET_REVIEWS_PER_CHECKPOINT / first.totalMatching();
-        return Math.max(MIN_DAYS_PER_CHECKPOINT, estimatedDays);
     }
 
     /** 날짜 경계에서 잘린 페이지는 완결된 뒷부분만 사용하고 남은 날짜를 다시 조회한다. */
     private Map<LocalDate, SteamReviewCounts> readPeriod(long appId, LocalDate start,
-                                                         LocalDate end, SteamReviewWindow first) {
+                                                         LocalDate end) {
         Map<LocalDate, SteamReviewCounts> counts = new HashMap<>();
         LocalDate until = end;
         while (until.isAfter(start)) {
-            SteamReviewWindow window = first != null ? first
-                : steamReviewClient.getReviewWindow(appId, start, until);
-            first = null;
+            SteamReviewWindow window = steamReviewClient.getReviewWindow(appId, start, until);
             counts.putAll(window.counts());
             LocalDate remainingEnd = window.completeFrom().minusDays(1);
             if (remainingEnd.isBefore(start)) {

@@ -114,6 +114,28 @@ class SteamCollectionSchedulerIntegrationTest {
     }
 
     @Test
+    @DisplayName("리뷰 수집은 한국 시각 00:15에 하루 한 번 실행된다")
+    void registersDailyReviewCollection() {
+        // given
+        String method = SteamReviewScheduler.class.getName() + ".collect";
+        List<Task> tasks = scheduling.getScheduledTasks().stream().map(ScheduledTask::getTask)
+            .filter(task -> task.toString().equals(method)).toList();
+        assertThat(tasks).singleElement().isInstanceOf(CronTask.class);
+        CronTask daily = (CronTask) tasks.getFirst();
+        SimpleTriggerContext context = new SimpleTriggerContext(
+            Clock.fixed(Instant.parse("2026-11-24T15:14:00Z"), ZoneOffset.UTC));
+
+        // when
+        Instant first = daily.getTrigger().nextExecution(context);
+        context.update(first, first, first);
+        Instant second = daily.getTrigger().nextExecution(context);
+
+        // then
+        assertThat(first).isEqualTo(Instant.parse("2026-11-24T15:15:00Z"));
+        assertThat(second).isEqualTo(Instant.parse("2026-11-25T15:15:00Z"));
+    }
+
+    @Test
     @DisplayName("동접 차트 수집은 기동 호출과 15분 단위 예약을 등록한다")
     void registersPlayerChartCollection() {
         // given

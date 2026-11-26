@@ -19,26 +19,16 @@ public class ReviewHistoryService {
 
     private final ReviewHistoryRepository reviewHistoryRepository;
 
-    /** 최초 등록은 앱 번호의 나머지에 따라 오늘부터 7일에 분산한다. */
-    public Long registerBatch(LocalDate today, long afterId, int limit) {
-        return reviewHistoryRepository.registerBatch(today, today.getDayOfWeek().getValue() - 1,
-            afterId, limit);
-    }
-
     /** 현재 회차에 처리할 본편과 DLC를 내부 키순으로 읽는다. */
     @Transactional(readOnly = true)
-    public List<ReviewCollectionTarget> findDue(LocalDate today, boolean initial, long afterId,
-                                                int limit) {
-        return reviewHistoryRepository.findDue(today, initial, afterId, Limit.of(limit));
+    public List<ReviewCollectionTarget> findDue(int weekday, LocalDate start, LocalDate end,
+                                                long afterId, int limit) {
+        return reviewHistoryRepository.findDue(weekday, start, end, afterId, Limit.of(limit));
     }
 
     /** 리뷰가 없었던 앱도 확인 범위는 다른 앱과 함께 갱신한다. */
-    public void saveBatch(List<CollectedReviews> batch) {
-        int size = batch.size();
-        Long[] gameIds = new Long[size];
-        LocalDate[] starts = new LocalDate[size];
-        LocalDate[] ends = new LocalDate[size];
-        LocalDate[] nextDates = new LocalDate[size];
+    public void saveBatch(List<CollectedReviews> batch, LocalDate start, LocalDate end) {
+        Long[] gameIds = new Long[batch.size()];
 
         List<Long> rowGames = new ArrayList<>();
         List<LocalDate> days = new ArrayList<>();
@@ -46,11 +36,7 @@ public class ReviewHistoryService {
         List<Integer> totals = new ArrayList<>();
         int index = 0;
         for (CollectedReviews app : batch) {
-            gameIds[index] = app.gameId();
-            starts[index] = app.start();
-            ends[index] = app.end();
-            nextDates[index] = app.nextDueOn();
-            index++;
+            gameIds[index++] = app.gameId();
 
             app.counts().forEach((day, counts) -> {
                 rowGames.add(app.gameId());
@@ -60,7 +46,7 @@ public class ReviewHistoryService {
             });
         }
 
-        reviewHistoryRepository.insertBatch(gameIds, starts, ends, nextDates,
+        reviewHistoryRepository.insertBatch(gameIds, start, end,
             rowGames.toArray(Long[]::new), days.toArray(LocalDate[]::new),
             positive.toArray(Integer[]::new), totals.toArray(Integer[]::new));
     }
