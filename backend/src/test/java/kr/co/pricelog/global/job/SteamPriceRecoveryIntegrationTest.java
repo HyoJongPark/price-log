@@ -87,7 +87,7 @@ class SteamPriceRecoveryIntegrationTest {
     void setUp() {
         jdbcTemplate.execute("""
             TRUNCATE pipeline_execution, price_history, game_purchase_option, purchase_option,
-                     game_tag, review_history, review_collection, game
+                     game_tag, review_history, game
             """);
         gameCatalogService.applyPage(GAME, TARGETS.stream().map(id -> new SteamApp(id, "게임 " + id))
             .toList(), SLOT);

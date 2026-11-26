@@ -69,8 +69,8 @@ class SteamReviewCollectorIntegrationTest {
     }
 
     @Test
-    @DisplayName("담당 요일의 본편·DLC만 7일치를 읽고 실패한 앱만 재실행하며 미수집 주는 비워 둔다")
-    void resumesWeeklyCoverage() {
+    @DisplayName("같은 주를 재실행하면 담당 요일의 본편·DLC를 다시 읽고 집계는 한 번 저장한다")
+    void recollectsAssignedWeekWithoutDuplicateCounts() {
         // given
         gameCatalogService.applyPage(SteamAppType.GAME, List.of(new SteamApp(7, "본편"),
             new SteamApp(8, "화요일 본편"), new SteamApp(28, "삭제 본편"),
@@ -89,10 +89,6 @@ class SteamReviewCollectorIntegrationTest {
         // when
         steamReviewCollector.collectDue(MONDAY);
         jdbcTemplate.update("UPDATE game SET deleted_at = now() WHERE steam_app_id = 15");
-        assertThat(jdbcTemplate.queryForObject(
-            "SELECT count(*) FROM review_collection WHERE collected_through IS NOT NULL",
-            Integer.class)).isOne();
-        steamReviewCollector.collectDue(MONDAY);
         steamReviewCollector.collectDue(MONDAY);
         LocalDate twoWeeksLater = MONDAY.plusWeeks(2);
         when(steamReviewClient.getReviewWindow(anyLong(), any(), any())).thenAnswer(call ->
@@ -101,17 +97,13 @@ class SteamReviewCollectorIntegrationTest {
         steamReviewCollector.collectDue(twoWeeksLater);
 
         // then
-        verify(steamReviewClient).getReviewWindow(7, start, end);
+        verify(steamReviewClient, times(2)).getReviewWindow(7, start, end);
         verify(steamReviewClient, times(2)).getReviewWindow(14, start, end);
         verify(steamReviewClient).getReviewWindow(7, MONDAY.plusWeeks(1),
             twoWeeksLater.minusDays(1));
         verify(steamReviewClient).getReviewWindow(14, MONDAY.plusWeeks(1),
             twoWeeksLater.minusDays(1));
         verify(steamReviewClient).getReviewWindow(8, MONDAY.minusDays(6), MONDAY);
-        assertThat(jdbcTemplate.queryForList("""
-            SELECT c.first_review_date FROM review_collection c JOIN game g ON g.id = c.game_id
-            WHERE g.steam_app_id = 7 ORDER BY c.first_review_date
-            """, LocalDate.class)).containsExactly(start, MONDAY.plusWeeks(1));
         verifyNoMoreInteractions(steamReviewClient);
         assertThat(jdbcTemplate.queryForList("""
             SELECT g.steam_app_id, h.total_count FROM review_history h JOIN game g ON g.id=h.game_id
@@ -119,34 +111,7 @@ class SteamReviewCollectorIntegrationTest {
     }
 
     @Test
-    @DisplayName("지난주 중간까지 확인한 앱은 7일을 확인한 뒤 기존 구간을 연장한다")
-    void extendsPartiallyCoveredWeek() {
-        // given
-        gameCatalogService.applyPage(SteamAppType.GAME, List.of(new SteamApp(7, "게임")),
-            Instant.now());
-        LocalDate start = MONDAY.minusWeeks(1);
-        LocalDate end = MONDAY.minusDays(1);
-        LocalDate earlier = start.minusWeeks(2);
-        jdbcTemplate.update("""
-            INSERT INTO review_collection(game_id, first_review_date, collected_through)
-            SELECT id, ?, ? FROM game WHERE steam_app_id = 7
-            """, earlier, start.plusDays(1));
-        when(steamReviewClient.getReviewWindow(7, start, end))
-            .thenReturn(new SteamReviewWindow(0, start, Map.of()));
-
-        // when
-        steamReviewCollector.collectDue(MONDAY);
-
-        // then
-        assertThat(jdbcTemplate.queryForList("""
-            SELECT first_review_date FROM review_collection WHERE collected_through = ?
-            """, LocalDate.class, end)).containsExactly(earlier);
-        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM review_collection",
-            Integer.class)).isOne();
-    }
-
-    @Test
-    @DisplayName("143개 앱의 1001일을 1000행 이하로 나눠 저장하고 재실행은 건너뛴다")
+    @DisplayName("143개 앱의 1001일을 1000행 이하로 나눠 일괄 저장한다")
     void insertsBoundedCrossGameBatches() {
         // given
         jdbcTemplate.execute("CREATE EXTENSION IF NOT EXISTS pg_stat_statements");
@@ -165,53 +130,46 @@ class SteamReviewCollectorIntegrationTest {
 
         // when
         steamReviewCollector.collectDue(MONDAY);
-        steamReviewCollector.collectDue(MONDAY);
 
         // then
         assertThat(jdbcTemplate.queryForList("""
             SELECT count(*) FROM review_history GROUP BY xmin::text ORDER BY count(*)
             """, Integer.class)).containsExactly(7, 994);
         assertThat(jdbcTemplate.queryForObject("""
-            SELECT sum(calls) FROM pg_stat_statements WHERE query LIKE 'WITH covered AS (%'
+            SELECT sum(calls) FROM pg_stat_statements WHERE query LIKE 'INSERT INTO review_history%'
             """, Integer.class)).isEqualTo(2);
         verify(steamReviewClient, times(143)).getReviewWindow(anyLong(), any(), any());
     }
 
     @Test
-    @DisplayName("0건인 앱도 250개씩 진행 위치를 저장하고 이미 완료한 앱은 다시 요청하지 않는다")
-    void checkpointsEmptyAppsInBoundedTransactions() {
+    @DisplayName("리뷰가 없는 주는 재실행해도 이력 INSERT를 실행하지 않는다")
+    void skipsInsertsForEmptyWeek() {
         // given
-        List<SteamApp> games = IntStream.rangeClosed(1, 251)
-            .mapToObj(i -> new SteamApp(i * 7L, "게임 " + i)).toList();
-        gameCatalogService.applyPage(SteamAppType.GAME, games, Instant.now());
+        jdbcTemplate.execute("CREATE EXTENSION IF NOT EXISTS pg_stat_statements");
+        gameCatalogService.applyPage(SteamAppType.GAME, List.of(new SteamApp(7, "게임")),
+            Instant.now());
         when(steamReviewClient.getReviewWindow(anyLong(), any(), any()))
             .thenReturn(new SteamReviewWindow(0, MONDAY.minusWeeks(1), Map.of()));
+        jdbcTemplate.execute("SELECT pg_stat_statements_reset()");
 
         // when
         steamReviewCollector.collectDue(MONDAY);
         steamReviewCollector.collectDue(MONDAY);
 
         // then
-        assertThat(jdbcTemplate.queryForList("""
-            SELECT count(*) FROM review_collection WHERE collected_through IS NOT NULL
-            GROUP BY xmin::text ORDER BY count(*)
-            """, Integer.class)).containsExactly(1, 250);
-        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM review_history",
-            Integer.class)).isZero();
-        verify(steamReviewClient, times(251)).getReviewWindow(anyLong(), any(), any());
+        assertThat(jdbcTemplate.queryForObject("""
+            SELECT count(*) FROM pg_stat_statements WHERE query LIKE 'INSERT INTO review_history%'
+            """, Integer.class)).isZero();
+        verify(steamReviewClient, times(2)).getReviewWindow(7, MONDAY.minusWeeks(1),
+            MONDAY.minusDays(1));
     }
 
     @Test
-    @DisplayName("주간 리뷰 700건이 마지막 날에 몰리면 그날만 저장하고 앞선 6일도 확인 완료한다")
+    @DisplayName("주간 리뷰 700건이 마지막 날에 몰리면 그날의 집계만 저장한다")
     void collectsWeekWithAllReviewsOnLastDay() {
         // given
         gameCatalogService.applyPage(SteamAppType.GAME, List.of(new SteamApp(7, "게임")),
             Instant.now());
-        LocalDate start = MONDAY.minusWeeks(1);
-        when(steamReviewClient.getReviewWindow(7, start, MONDAY.minusDays(1)))
-            .thenReturn(new SteamReviewWindow(0, start, Map.of()));
-        steamReviewCollector.collectDue(MONDAY);
-
         LocalDate nextMonday = MONDAY.plusWeeks(1);
         LocalDate sunday = nextMonday.minusDays(1);
         // 첫 페이지가 일요일 중간에서 잘려 완결된 날짜가 하나도 없는 응답이다.
@@ -231,22 +189,19 @@ class SteamReviewCollectorIntegrationTest {
         assertThat(jdbcTemplate.queryForMap(
             "SELECT positive_count, total_count FROM review_history"))
             .containsExactlyInAnyOrderEntriesOf(Map.of("positive_count", 520, "total_count", 700));
-        assertThat(jdbcTemplate.queryForObject("SELECT collected_through FROM review_collection",
-            LocalDate.class)).isEqualTo(sunday);
-        assertThat(jdbcTemplate.queryForObject("SELECT first_review_date FROM review_collection",
-            LocalDate.class)).isEqualTo(start);
     }
 
     @Test
-    @DisplayName("429가 소진되면 앞선 앱을 저장하고 재실행은 실패한 앱의 같은 주를 조회한다")
-    void resumesWeekAfterRateLimit() {
+    @DisplayName("429가 소진되면 앞선 앱을 저장하고 재실행은 같은 주를 처음부터 읽는다")
+    void restartsWeekAfterRateLimit() {
         // given
         gameCatalogService.applyPage(SteamAppType.GAME, List.of(new SteamApp(7, "게임"),
             new SteamApp(14, "다음 게임")), Instant.now());
         LocalDate start = MONDAY.minusWeeks(1);
         LocalDate end = MONDAY.minusDays(1);
         SteamReviewWindow empty = new SteamReviewWindow(0, start, Map.of());
-        when(steamReviewClient.getReviewWindow(7, start, end)).thenReturn(empty);
+        when(steamReviewClient.getReviewWindow(7, start, end)).thenReturn(
+            new SteamReviewWindow(1, start, Map.of(end, new SteamReviewCounts(1, 1))));
         when(steamReviewClient.getReviewWindow(14, start, end))
             .thenThrow(HttpClientErrorException.create(HttpStatus.TOO_MANY_REQUESTS, "제한",
                 HttpHeaders.EMPTY, null, null))
@@ -254,26 +209,30 @@ class SteamReviewCollectorIntegrationTest {
 
         // when
         Throwable failure = catchThrowable(() -> steamReviewCollector.collectDue(MONDAY));
+        List<LocalDate> savedBeforeRetry = jdbcTemplate.queryForList(
+            "SELECT review_date FROM review_history", LocalDate.class);
         steamReviewCollector.collectDue(MONDAY);
 
         // then
+        assertThat(savedBeforeRetry).containsExactly(end);
         assertThat(failure).isInstanceOf(HttpClientErrorException.TooManyRequests.class);
-        verify(steamReviewClient).getReviewWindow(7, start, end);
+        verify(steamReviewClient, times(2)).getReviewWindow(7, start, end);
         verify(steamReviewClient, times(2)).getReviewWindow(14, start, end);
-        assertThat(jdbcTemplate.queryForList("SELECT collected_through FROM review_collection",
-            LocalDate.class)).containsExactly(end, end);
+        assertThat(jdbcTemplate.queryForList("SELECT review_date FROM review_history",
+            LocalDate.class)).containsExactly(end);
     }
 
     @Test
-    @DisplayName("이력 삽입에 실패하면 같은 청크의 확인 범위도 롤백한다")
-    void rollsBackCoverageOnInsertFailure() {
+    @DisplayName("유효하지 않은 집계가 있으면 같은 청크의 이력을 모두 롤백한다")
+    void rollsBackInvalidBatch() {
         // given
         gameCatalogService.applyPage(SteamAppType.GAME, List.of(new SteamApp(7, "게임")),
             Instant.now());
         LocalDate end = MONDAY.minusDays(1);
         when(steamReviewClient.getReviewWindow(7, MONDAY.minusWeeks(1), end))
             .thenReturn(new SteamReviewWindow(1, MONDAY.minusWeeks(1),
-                Map.of(end, new SteamReviewCounts(2, 1))));
+                Map.of(end.minusDays(1), new SteamReviewCounts(1, 1),
+                    end, new SteamReviewCounts(2, 1))));
 
         // when
         Throwable failure = catchThrowable(() -> steamReviewCollector.collectDue(MONDAY));
@@ -281,7 +240,7 @@ class SteamReviewCollectorIntegrationTest {
         // then
         assertThat(failure).isInstanceOf(DataIntegrityViolationException.class);
         assertThat(jdbcTemplate.queryForObject(
-            "SELECT count(*) FROM review_collection",
+            "SELECT count(*) FROM review_history",
             Integer.class)).isZero();
     }
 }

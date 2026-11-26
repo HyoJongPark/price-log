@@ -43,7 +43,7 @@ public class SteamReviewCollector {
 
         MDC.put("collectionTask", "[STEAM_REVIEW] 구매자 평가 수집");
         List<ReviewCollectionTarget> targets =
-            reviewHistoryService.findDue(weekday, start, end, 0, TARGET_PAGE_SIZE);
+            reviewHistoryService.findDue(weekday, 0, TARGET_PAGE_SIZE);
         if (targets.isEmpty()) {
             return;
         }
@@ -52,7 +52,7 @@ public class SteamReviewCollector {
         while (!targets.isEmpty()) {
             collectBatch(targets, start, end);
             long afterId = targets.getLast().gameId();
-            targets = reviewHistoryService.findDue(weekday, start, end, afterId, TARGET_PAGE_SIZE);
+            targets = reviewHistoryService.findDue(weekday, afterId, TARGET_PAGE_SIZE);
         }
         log.info("[STEAM_REVIEW] 구매자 평가 수집 종료");
     }
@@ -67,7 +67,7 @@ public class SteamReviewCollector {
             try {
                 counts = readPeriod(target.steamAppId(), start, end);
             } catch (HttpClientErrorException.TooManyRequests limited) {
-                savePending(batch, start, end);
+                savePending(batch);
                 throw limited;
             } catch (RestClientException failure) {
                 log.warn("Steam 구매자 평가 미수집. 앱 {}, 시작일 {}, 사유 {}",
@@ -75,20 +75,23 @@ public class SteamReviewCollector {
                 continue;
             }
 
+            if (counts.isEmpty()) {
+                continue;
+            }
             if (rows + counts.size() > ROWS_PER_BATCH || batch.size() == APPS_PER_BATCH) {
-                savePending(batch, start, end);
+                savePending(batch);
                 batch.clear();
                 rows = 0;
             }
             batch.add(new CollectedReviews(target.gameId(), counts));
             rows += counts.size();
         }
-        savePending(batch, start, end);
+        savePending(batch);
     }
 
-    private void savePending(List<CollectedReviews> batch, LocalDate start, LocalDate end) {
+    private void savePending(List<CollectedReviews> batch) {
         if (!batch.isEmpty()) {
-            reviewHistoryService.saveBatch(batch, start, end);
+            reviewHistoryService.saveBatch(batch);
         }
     }
 
