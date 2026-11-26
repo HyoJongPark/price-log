@@ -85,7 +85,7 @@ class SteamStorePriceIntegrationTest {
             objectMapper), steamPriceCollectionService);
         jdbcTemplate.execute("""
             TRUNCATE pipeline_execution, price_history, game_purchase_option, purchase_option,
-                     game_tag, game
+                     game_tag, review_history, review_collection, game
             """);
         gameCatalogService.applyPage(GAME, List.of(new SteamApp(301, "게임 A"),
             new SteamApp(302, "게임 B")), Instant.now());

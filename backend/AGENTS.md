@@ -19,6 +19,8 @@ Spring Boot 진입점 아래에서 업무 모델은 `domain`, 외부 시스템 �
 
 컨트롤러·서비스·저장소 타입은 업무 이름 뒤에 각각 `Controller`, `Service`, `Repository`를 붙인다. 저장소 인터페이스에도 같은 접미사를 적용한다. 영속화는 Spring Data JPA 저장소를 통해 수행한다. 직접 작성한 쿼리도 해당 업무의 `repository`에 둔다.
 
+저장소 메서드는 **Spring Data JPA 기본·이름 기반 메서드 → JPQL → 네이티브 SQL** 순서로 선택한다. 이름으로 표현하기 어려운 조인·집계는 JPQL을 먼저 검토한다. 네이티브 SQL을 선택할 때는 앞선 방식으로 처리하기 어려운 조건을 구현·리뷰에서 구체적으로 설명한다. 예를 들어 PostgreSQL의 `ON CONFLICT`로 청크 전체의 중복을 한 번에 처리하는 경우다.
+
 ## 계층 사이에 전달하는 값
 
 - Controller ↔ Service, Service ↔ Client 간 데이터 전달에는 DTO를 사용한다. 단순 값·ID·enum은 그대로 전달하며, 엔티티는 Service와 Repository에서 사용한다.
@@ -27,7 +29,7 @@ DB에 쓰는 업무 단위는 서비스 클래스에 `@Transactional`을 붙이�
 
 명시적 락은 같은 데이터를 동시에 변경하는 실행 경로가 있고, 트랜잭션과 DB 제약만으로는 필요한 동작을 보장하기 어려울 때 사용한다.
 
-JPA 엔티티는 `global/entity/BaseEntity`를 상속한다. Spring Data JPA Auditing으로 `createdAt`은 최초 저장 시 한 번, `updatedAt`은 생성과 실제 수정 시 기록한다. 관측 시각과 카탈로그 확인 시각은 도메인이 별도로 관리한다.
+JPA 엔티티는 기본적으로 `global/entity/BaseEntity`를 상속한다. 감사 컬럼이 없는 테이블의 JPQL 조회 전용 엔티티는 `BaseEntity` 상속을 생략하고 `@Immutable`로 매핑한다. Spring Data JPA Auditing으로 `createdAt`은 최초 저장 시 한 번, `updatedAt`은 생성과 실제 수정 시 기록한다. 관측 시각과 카탈로그 확인 시각은 도메인이 별도로 관리한다.
 
 ## 외부 API 클라이언트
 

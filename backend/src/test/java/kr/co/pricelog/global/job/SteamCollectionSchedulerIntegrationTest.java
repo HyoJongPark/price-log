@@ -66,6 +66,9 @@ class SteamCollectionSchedulerIntegrationTest {
     @MockitoBean(answers = Answers.CALLS_REAL_METHODS)
     private TaskScheduler taskScheduler;
 
+    @MockitoBean(answers = Answers.CALLS_REAL_METHODS)
+    private TaskScheduler reviewTaskScheduler;
+
     @Autowired
     private ScheduledAnnotationBeanPostProcessor scheduling;
 

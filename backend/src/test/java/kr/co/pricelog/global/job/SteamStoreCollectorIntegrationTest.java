@@ -128,7 +128,7 @@ class SteamStoreCollectorIntegrationTest {
         @BeforeEach
         void setUpGames() {
             jdbcTemplate.execute(
-                "TRUNCATE price_history, game_purchase_option, purchase_option, game_tag, game");
+                "TRUNCATE purchase_option, game CASCADE");
             gameCatalogService.applyPage(GAME, List.of(new SteamApp(301, "게임 A"),
                 new SteamApp(302, "게임 B")), Instant.now());
         }
