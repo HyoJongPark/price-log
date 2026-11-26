@@ -15,7 +15,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import kr.co.pricelog.domain.game.entity.Game;
-import kr.co.pricelog.domain.game.enums.SteamAppType;
 import kr.co.pricelog.domain.game.enums.StoreVisibility;
 import kr.co.pricelog.domain.game.repository.GameRepository;
 import kr.co.pricelog.domain.game.service.GameTagService;
@@ -88,9 +87,8 @@ public class GamePurchaseOptionService {
 
             SteamPurchaseOptions result = entry.getValue();
             boolean visible = result.storeVisibility() == StoreVisibility.VISIBLE;
-            boolean visibleGame = visible && game.getAppType() == SteamAppType.GAME;
-            // 태그는 재개한 회차에서도 지금 확인한 본편의 순서를 따른다.
-            if (visibleGame && result.tagIds() != null) {
+            // 태그는 재개한 회차에서도 지금 확인한 앱의 순서를 따른다.
+            if (visible && result.tagIds() != null) {
                 tagsByGame.put(game.getId(), result.tagIds());
             }
 
@@ -99,17 +97,16 @@ public class GamePurchaseOptionService {
             boolean currentStoreState = visible && !protectedSale;
             Boolean free = currentStoreState && result.freeToPlay() != null
                 ? result.freeToPlay() : game.getFreeToPlay();
-            boolean updateGameDetails = visibleGame && !protectedSale;
-            String imageUrl = updateGameDetails && result.imageUrl() != null
+            String imageUrl = currentStoreState && result.imageUrl() != null
                 ? result.imageUrl() : game.getImageUrl();
-            String description = updateGameDetails && result.description() != null
+            String description = currentStoreState && result.description() != null
                 ? result.description() : game.getDescription();
 
-            SteamRelease release = updateGameDetails ? result.release() : null;
+            SteamRelease release = currentStoreState ? result.release() : null;
             // 출시 예정이 끝나면 예고 일정은 지우고, 이미 확인한 출시일은 날짜 생략 시 보존한다.
             boolean updateSchedule = release != null
                 && (release.comingSoon() || release.date() != null || game.getComingSoon());
-            String koreanSupport = updateGameDetails && result.koreanSupportText() != null
+            String koreanSupport = currentStoreState && result.koreanSupportText() != null
                 ? result.koreanSupportText() : game.getKoreanSupportText();
             GameState state = new GameState(game.getId(), result.storeVisibility(), free,
                 imageUrl, description, updateSchedule ? release.date() : game.getReleaseDate(),

@@ -9,12 +9,12 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 
-/** 한국어 태그 사전과 본편의 상위 태그를 묶음 단위로 반영한다. */
+/** 한국어 태그 사전과 앱별 상위 태그를 묶음 단위로 반영한다. */
 public interface GameTagRepository extends Repository<Game, Long> {
 
     /** 기존 설치 보완에 필요한 두 식별자만 앱 번호 순으로 읽는다. */
-    List<CatalogGameId> findByAppTypeAndSteamAppIdGreaterThanOrderBySteamAppId(
-        SteamAppType appType, long afterAppId, Limit limit);
+    List<CatalogGameId> findByAppTypeInAndSteamAppIdGreaterThanOrderBySteamAppId(
+        List<SteamAppType> appTypes, long afterAppId, Limit limit);
 
     /** 이름이 없는 새 ID도 먼저 연결할 수 있다. 이름을 알게 되면 기존 행을 갱신한다. */
     @Modifying

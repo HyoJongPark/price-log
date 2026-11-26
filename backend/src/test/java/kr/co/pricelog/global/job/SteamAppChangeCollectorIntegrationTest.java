@@ -144,7 +144,7 @@ class SteamAppChangeCollectorIntegrationTest {
     }
 
     @Test
-    @DisplayName("첫 조회가 실패해도 다음 회차는 이전 구간부터 다시 읽고 새 본편만 가격을 확인한다")
+    @DisplayName("첫 조회가 실패해도 다음 회차는 이전 구간부터 다시 읽고 등록된 본편과 DLC의 가격을 함께 확인한다")
     void retriesListWindowAndSharesHistoryWithFullCollection() {
         // given
         Instant since = CATALOG_START.minus(1, ChronoUnit.HOURS);
@@ -153,10 +153,10 @@ class SteamAppChangeCollectorIntegrationTest {
         when(steamAppListClient.getChangedPage(GAME, 0, 10000, since)).thenReturn(first);
         when(steamAppListClient.getChangedPage(GAME, 10, 10000, since))
             .thenThrow(new RestClientException("중단")).thenReturn(EMPTY);
-        when(steamAppListClient.getChangedPage(DLC, 0, 10000, since)).thenReturn(page(20));
-        when(steamStoreClient.getDlcParents(List.of(20L))).thenReturn(Map.of(20L, 10L));
-        when(steamStoreClient.getPurchaseOptions(List.of(10L)))
-            .thenReturn(Map.of(10L, option(10L)));
+        when(steamAppListClient.getChangedPage(DLC, 0, 10000, since)).thenReturn(page(20, 21));
+        when(steamStoreClient.getDlcParents(List.of(20L, 21L))).thenReturn(Map.of(20L, 10L));
+        when(steamStoreClient.getPurchaseOptions(List.of(10L, 20L)))
+            .thenReturn(Map.of(10L, option(10L), 20L, option(20L)));
 
         // when
         final Throwable failure =
@@ -171,14 +171,21 @@ class SteamAppChangeCollectorIntegrationTest {
         assertThat(status(nextHour)).isEqualTo("COMPLETED");
         assertThat(jdbcTemplate.queryForList("SELECT app_type FROM game ORDER BY steam_app_id",
             String.class)).containsExactly("GAME", "DLC");
-        assertThat(jdbcTemplate.queryForList("SELECT slot_at FROM price_history", Timestamp.class))
-            .containsExactly(Timestamp.from(nextHour));
-        verify(steamStoreClient, times(2)).getPurchaseOptions(List.of(10L));
+        assertThat(jdbcTemplate.queryForList("""
+            SELECT g.steam_app_id, o.steam_id, h.slot_at
+            FROM price_history h JOIN purchase_option o ON o.id = h.purchase_option_id
+            JOIN game_purchase_option link ON link.purchase_option_id = o.id
+            JOIN game g ON g.id = link.game_id
+            WHERE link.deleted_at IS NULL ORDER BY g.steam_app_id
+            """)).containsExactly(
+                Map.of("steam_app_id", 10L, "steam_id", 10L, "slot_at", Timestamp.from(nextHour)),
+                Map.of("steam_app_id", 20L, "steam_id", 20L, "slot_at", Timestamp.from(nextHour)));
+        verify(steamStoreClient, times(2)).getPurchaseOptions(List.of(10L, 20L));
         assertThat(jdbcTemplate.queryForList("""
             SELECT dlc.steam_app_id FROM game dlc JOIN game parent ON parent.id = dlc.parent_game_id
             WHERE parent.steam_app_id = 10
             """, Long.class)).containsExactly(20L);
-        verify(steamStoreClient).getDlcParents(List.of(20L));
+        verify(steamStoreClient).getDlcParents(List.of(20L, 21L));
         verifyNoMoreInteractions(steamStoreClient);
     }
 
@@ -277,9 +284,9 @@ class SteamAppChangeCollectorIntegrationTest {
         when(steamStoreClient.getPurchaseOptions(List.of(20L))).thenReturn(Map.of());
         when(steamStoreClient.getPurchaseOptions(List.of(30L)))
             .thenThrow(new RestClientException("상점 중단"));
-        when(steamStoreClient.getPurchaseOptions(List.of(15L, 20L, 30L, 35L)))
+        when(steamStoreClient.getPurchaseOptions(List.of(15L, 20L, 30L, 35L, 40L)))
             .thenReturn(Map.of(15L, option(15L), 20L, option(20L), 30L, option(30L),
-                35L, option(35L)));
+                35L, option(35L), 40L, option(40L)));
 
         // when
         final Throwable failure =
@@ -294,7 +301,7 @@ class SteamAppChangeCollectorIntegrationTest {
         assertThat(status(nextHour)).isEqualTo("COMPLETED");
         verify(steamAppListClient).getChangedPage(GAME, 0, 10000,
             MIDNIGHT.minus(1, ChronoUnit.HOURS));
-        verify(steamStoreClient).getPurchaseOptions(List.of(15L, 20L, 30L, 35L));
+        verify(steamStoreClient).getPurchaseOptions(List.of(15L, 20L, 30L, 35L, 40L));
         verify(steamStoreClient).getPurchaseOptions(List.of(10L));
         verify(steamStoreClient).getPurchaseOptions(List.of(20L));
         verify(steamStoreClient).getPurchaseOptions(List.of(30L));
@@ -302,7 +309,8 @@ class SteamAppChangeCollectorIntegrationTest {
         verifyNoMoreInteractions(steamStoreClient);
         assertThat(jdbcTemplate.queryForList("SELECT slot_at FROM price_history ORDER BY slot_at",
             Timestamp.class)).containsExactly(Timestamp.from(MIDNIGHT), Timestamp.from(nextHour),
-            Timestamp.from(nextHour), Timestamp.from(nextHour), Timestamp.from(nextHour));
+            Timestamp.from(nextHour), Timestamp.from(nextHour), Timestamp.from(nextHour),
+            Timestamp.from(nextHour));
     }
 
     @Test

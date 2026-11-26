@@ -163,6 +163,9 @@ class SteamCollectionSchedulerIntegrationTest {
         when(steamStoreClient.getPurchaseOptions(List.of(30L))).thenReturn(
             Map.of(30L, visiblePurchaseOptions(List.of(option), option, false)));
 
+        when(steamStoreClient.getPurchaseOptions(List.of(20L))).thenReturn(
+            Map.of(20L, visiblePurchaseOptions(List.of(), null, false)));
+
         SteamPurchaseOption base = new SteamPurchaseOption(PACKAGE, 50, "본편",
             new SteamPrice(2000, null, null));
         SteamPurchaseOption discounted = new SteamPurchaseOption(PACKAGE, 50, "본편",
@@ -205,6 +208,7 @@ class SteamCollectionSchedulerIntegrationTest {
         verifyNoMoreInteractions(steamAppListClient);
         verify(steamStoreClient, times(2)).getPurchaseOptions(List.of(10L));
         verify(steamStoreClient).getPurchaseOptions(List.of(30L));
+        verify(steamStoreClient, times(2)).getPurchaseOptions(List.of(20L));
         verify(steamStoreClient).getDlcParents(List.of(20L));
         verifyNoMoreInteractions(steamStoreClient);
     }

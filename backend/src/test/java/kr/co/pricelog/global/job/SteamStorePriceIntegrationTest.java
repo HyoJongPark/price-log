@@ -98,6 +98,7 @@ class SteamStorePriceIntegrationTest {
         gameCatalogService.applyPage(DLC, List.of(new SteamApp(303, "추가 콘텐츠")), Map.of(303L, 301L),
             SLOT);
         respondWithItems("""
+            {"item_type":0,"id":303,"success":1},
             {"item_type":0,"id":302,"success":1},
             {"item_type":0,"id":301,"success":1,"assets":{
              "asset_url_format":"steam/apps/301/${FILENAME}?t=15",
@@ -111,7 +112,7 @@ class SteamStorePriceIntegrationTest {
             """);
 
         // when
-        steamStoreCollector.collectAll(SLOT, 2);
+        steamStoreCollector.collectAll(SLOT, 3);
 
         // then
         String images = "SELECT image_url FROM game ORDER BY steam_app_id";
@@ -121,17 +122,19 @@ class SteamStorePriceIntegrationTest {
 
         steamStoreCollector.collectPurchaseOptions(List.of(301L, 303L), SLOT.plusSeconds(1));
         assertThat(jdbcTemplate.queryForList(images, String.class))
-            .containsExactly(cdn + "v2/header_2x.jpg?t=16", null, null);
+            .containsExactly(cdn + "v2/header_2x.jpg?t=16", null,
+                "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/303/dlc.jpg");
         mockRestServiceServer.verify();
     }
 
     @Test
-    @DisplayName("본편별 짧은 설명을 저장하고 재수집 때 내용이 있는 설명만 갱신한다")
+    @DisplayName("본편과 DLC의 짧은 설명을 저장하고 재수집 때 내용이 있는 설명만 갱신한다")
     void collectsGameDescriptions() {
         // given
         gameCatalogService.applyPage(DLC, List.of(new SteamApp(303, "추가 콘텐츠")), Map.of(303L, 301L),
             SLOT);
         respondWithItems("""
+            {"item_type":0,"id":303,"success":1},
             {"item_type":0,"id":302,"success":1,"basic_info":{"short_description":"기존 소개"}},
             {"item_type":0,"id":301,"success":1,"basic_info":{"short_description":"첫 소개"}}
             """);
@@ -149,7 +152,7 @@ class SteamStorePriceIntegrationTest {
         String descriptions = "SELECT description FROM game ORDER BY steam_app_id";
 
         // when
-        steamStoreCollector.collectAll(SLOT, 2);
+        steamStoreCollector.collectAll(SLOT, 3);
         List<String> initial = jdbcTemplate.queryForList(descriptions, String.class);
         steamStoreCollector.collectPurchaseOptions(List.of(301L, 302L, 303L), SLOT.plusSeconds(1));
         steamStoreCollector.collectPurchaseOptions(List.of(301L, 302L), SLOT.plusSeconds(2));
@@ -157,7 +160,7 @@ class SteamStorePriceIntegrationTest {
         // then
         assertThat(initial).containsExactly("첫 소개", "기존 소개", null);
         assertThat(jdbcTemplate.queryForList(descriptions, String.class))
-            .containsExactly("수정된 소개", "기존 소개", null);
+            .containsExactly("수정된 소개", "기존 소개", "DLC 소개");
         mockRestServiceServer.verify();
     }
 

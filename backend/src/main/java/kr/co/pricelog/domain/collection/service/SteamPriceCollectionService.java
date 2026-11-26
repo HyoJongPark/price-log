@@ -59,7 +59,7 @@ public class SteamPriceCollectionService {
             gameIds.toArray(Long[]::new));
     }
 
-    /** 처음 실행하면 본편 목록을 고정하고 재실행하면 DB의 마지막 커밋을 읽는다. */
+    /** 처음 실행하면 가격 조회 대상을 고정하고 재실행하면 DB의 마지막 커밋을 읽는다. */
     public Optional<SteamPriceCollectionPlan> openFullCollection(Instant now) {
         if (pipelineExecutionRepository.findFirstByPipelineTypeAndStatusOrderByScheduledAtAsc(
             STEAM_PRICE, COMPLETED).isPresent()) {
@@ -93,7 +93,7 @@ public class SteamPriceCollectionService {
             failedIds.toArray(Long[]::new));
     }
 
-    /** 모든 본편의 가격 조회가 해결된 회차를 마친다. */
+    /** 모든 대상 앱의 가격 조회가 해결된 회차를 마친다. */
     public void complete(long executionId) {
         pipelineExecutionRepository.finishPriceCollection(executionId, COMPLETED, Instant.now());
     }

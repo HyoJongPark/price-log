@@ -54,7 +54,7 @@ public class SteamCollectionScheduler {
         collectRecentChanges(now);
     }
 
-    /** 매시 정각에는 변경된 본편·DLC와 해당 본편의 가격을 확인한다. */
+    /** 매시 정각에는 변경된 본편·DLC와 등록된 앱의 가격을 확인한다. */
     @Scheduled(cron = "0 0 * * * *", zone = SEOUL)
     public void collectChanges() {
         collectRecentChanges(Instant.now());

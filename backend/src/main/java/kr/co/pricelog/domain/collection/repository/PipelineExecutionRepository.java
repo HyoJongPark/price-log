@@ -22,13 +22,13 @@ public interface PipelineExecutionRepository extends Repository<PipelineExecutio
         """)
     void openIfAbsent(PipelineType pipelineType, Instant scheduledAt);
 
-    /** 최초 실행에만 활성 본편 ID를 확정한다. 재개 시 카탈로그를 다시 읽지 않는다. */
+    /** 최초 실행에만 활성 본편·DLC ID를 확정한다. 재개 시 카탈로그를 다시 읽지 않는다. */
     @Modifying
     @Query(value = """
         INSERT INTO pipeline_execution (pipeline, scheduled_at, target_ids, created_at, updated_at)
         SELECT 'STEAM_PRICE', :slotAt, ARRAY(
             SELECT steam_app_id FROM game
-            WHERE app_type = 'GAME' AND deleted_at IS NULL ORDER BY steam_app_id
+            WHERE app_type IN ('GAME', 'DLC') AND deleted_at IS NULL ORDER BY steam_app_id
         ), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         WHERE NOT EXISTS (SELECT 1 FROM pipeline_execution
             WHERE pipeline = 'STEAM_PRICE' AND scheduled_at = :slotAt)
@@ -49,7 +49,7 @@ public interface PipelineExecutionRepository extends Repository<PipelineExecutio
     Optional<ExecutionTime> findFirstByPipelineTypeAndStatusOrderByScheduledAtAsc(
         PipelineType pipelineType, PipelineExecutionStatus status);
 
-    /** 직전 목록의 실패·미처리 ID를 DB 안에서 합쳐 활성 본편만 앱 번호순으로 확정한다. */
+    /** 직전 목록의 실패·미처리 ID를 DB 안에서 합쳐 활성 본편·DLC만 앱 번호순으로 확정한다. */
     @Modifying
     @Query(value = """
         WITH previous AS (
@@ -60,7 +60,7 @@ public interface PipelineExecutionRepository extends Repository<PipelineExecutio
             ORDER BY scheduled_at DESC LIMIT 1
         )
         UPDATE pipeline_execution SET target_ids = ARRAY(
-            SELECT steam_app_id FROM game WHERE app_type = 'GAME' AND deleted_at IS NULL
+            SELECT steam_app_id FROM game WHERE app_type IN ('GAME', 'DLC') AND deleted_at IS NULL
                 AND steam_app_id IN (
                     SELECT unnest(CAST(:gameIds AS bigint[]))
                     UNION ALL SELECT unnest(pending_ids) FROM previous

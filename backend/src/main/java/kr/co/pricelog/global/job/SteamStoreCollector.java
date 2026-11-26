@@ -33,7 +33,7 @@ public class SteamStoreCollector {
         return confirmed;
     }
 
-    /** 고정된 본편 목록을 모두 조회하고 회차 말미에 미해결 앱을 한 번씩 다시 확인한다. */
+    /** 고정된 본편·DLC 목록을 모두 조회하고 회차 말미에 미해결 앱을 한 번씩 다시 확인한다. */
     @Retry(name = "steamCollection")
     public void collectAll(Instant now, int batchSize) {
         Assert.isTrue(batchSize > 0, "가격 수집 묶음 크기는 양수여야 합니다");

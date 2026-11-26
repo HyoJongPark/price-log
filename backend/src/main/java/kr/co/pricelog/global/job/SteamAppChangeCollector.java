@@ -17,7 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 
-/** 변경된 본편·DLC를 카탈로그에 반영하고 본편의 한국 구매 옵션을 다시 확인한다. */
+/** 변경된 본편·DLC를 카탈로그에 반영하고 두 종류의 한국 구매 옵션을 다시 확인한다. */
 @Component
 @RequiredArgsConstructor
 public class SteamAppChangeCollector {
@@ -61,13 +61,12 @@ public class SteamAppChangeCollector {
                 if (!page.apps().isEmpty()) {
                     List<Long> ids = page.appIds();
                     Map<Long, Long> parents = Map.of();
-                    if (type == SteamAppType.GAME) {
-                        gameIds.addAll(ids);
-                    } else {
+                    if (type == SteamAppType.DLC) {
                         parents = steamDlcParentCollector.findParents(
                             gameCatalogService.findUnlinkedDlcIds(ids));
                     }
                     gameCatalogService.applyPage(type, page.apps(), parents, Instant.now());
+                    gameIds.addAll(ids);
                 }
                 cursor = page.nextCursor();
             }

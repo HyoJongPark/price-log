@@ -21,11 +21,11 @@ public class GameTagService {
 
     private final GameTagRepository gameTagRepository;
 
-    /** 기존 설치의 태그만 보완할 때 다음 활성 본편 배치를 읽는다. */
+    /** 기존 설치의 태그만 보완할 때 다음 활성 본편·DLC 배치를 읽는다. */
     @Transactional(readOnly = true)
     public List<CatalogGameId> findGamesAfter(long steamAppId, int batchSize) {
-        return gameTagRepository.findByAppTypeAndSteamAppIdGreaterThanOrderBySteamAppId(
-            SteamAppType.GAME, steamAppId, Limit.of(batchSize));
+        return gameTagRepository.findByAppTypeInAndSteamAppIdGreaterThanOrderBySteamAppId(
+            List.of(SteamAppType.GAME, SteamAppType.DLC), steamAppId, Limit.of(batchSize));
     }
 
     /** 같은 Steam 번호의 이름만 최신 한국어 이름으로 갱신한다. */

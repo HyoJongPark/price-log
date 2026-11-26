@@ -15,7 +15,7 @@ public class SteamDlcParentCollector {
     private final SteamStoreClient steamStoreClient;
     private final int batchSize;
 
-    /** 본편 가격 수집과 동일한 상점 요청 크기를 사용한다. */
+    /** 가격 수집과 동일한 상점 요청 크기를 사용한다. */
     public SteamDlcParentCollector(SteamStoreClient steamStoreClient,
                                   @Value("${pricelog.collection.daily.batch-size}") int batchSize) {
         Assert.isTrue(batchSize > 0, "상점 수집 묶음 크기는 양수여야 합니다");

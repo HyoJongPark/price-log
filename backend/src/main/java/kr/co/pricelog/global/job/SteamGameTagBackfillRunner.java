@@ -24,7 +24,7 @@ public class SteamGameTagBackfillRunner implements CommandLineRunner {
     private final long afterAppId;
     private final int batchSize;
 
-    /** 저장이 끝난 배치의 마지막 앱 번호를 지정하면 그 다음 본편부터 시작한다. */
+    /** 저장이 끝난 배치의 마지막 앱 번호를 지정하면 그 다음 앱부터 시작한다. */
     public SteamGameTagBackfillRunner(SteamStoreClient steamStoreClient,
                                       GameTagService gameTagService,
                                       @Value("${pricelog.collection.tag-backfill.after-app-id}")
