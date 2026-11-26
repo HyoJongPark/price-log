@@ -18,7 +18,7 @@ if ! "${compose[@]}" up -d --no-deps --pull never --wait --wait-timeout 120 back
     exit 1
 fi
 
-# 같은 릴리스로 수집을 켜거나 재시도할 때도 직전 정상 버전을 보존한다.
+# 같은 릴리스로 재시도할 때도 직전 정상 버전을 보존한다.
 current="$PRICELOG_DEPLOY_ROOT/current"
 if [[ -L "$current" && $(readlink "$current") != "$release_dir" ]]; then
     ln -sfn "$(readlink "$current")" "$PRICELOG_DEPLOY_ROOT/previous"

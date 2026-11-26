@@ -13,7 +13,7 @@
 ~/price-log/releases/     # Actions가 생성
 ```
 
-DB 최초 기동 전에 `.env`에 DB 암호를 설정한다. 앱을 처음 배포할 때는 같은 파일에 `STEAM_WEB_API_KEY`를 설정하고 `PRICELOG_COLLECTION_DAILY_ENABLED=false`로 둔다. Compose에서 `$`를 포함하는 암호는 작은따옴표로 감싼다.
+DB 최초 기동 전에 `.env`에 DB 암호를 설정한다. 앱을 처음 배포하기 전에 같은 파일에 `STEAM_WEB_API_KEY`를 설정한다. Compose에서 `$`를 포함하는 암호는 작은따옴표로 감싼다.
 
 ```sh
 cd ~/price-log
@@ -48,16 +48,12 @@ PostgreSQL은 호스트에 포트를 게시하지 않으며 같은 Docker 네트
 
 SSH는 GitHub 호스팅 러너에서 접속할 수 있어야 한다. Actions는 `GITHUB_TOKEN`으로 GHCR에 이미지를 발행한다. 비공개 패키지는 서버 배포 계정에도 패키지 읽기 권한을 부여하고 `docker login ghcr.io`를 한 번 수행한다. CI와 앱 실행에는 운영 DB 외부 공개가 필요하지 않다.
 
-## 첫 기동과 수집 시작
+## 배포 후 수집 확인
 
-1. 첫 릴리스가 성공하면 서버에서 `curl -fsS http://127.0.0.1:8080/actuator/health`와 `~/price-log/logs/pricelog.log`를 확인한다. 앱이 운영 DB에 Flyway를 적용했는지 `flyway_schema_history`와 대조한다.
-2. `.env`에서 `PRICELOG_COLLECTION_DAILY_ENABLED=true`로 변경한다. 배포 잡이 끝난 상태에서 아래 명령으로 같은 릴리스를 적용한다. Compose가 변경된 환경 변수로 앱을 다시 생성한다.
-3. `pipeline_execution`의 카탈로그 커서와 가격 처리 위치, 최초 적재 후 매시 변경분을 확인한다. 리뷰는 한국 시각 00:15에 담당 앱을 확인한다. 헬스 체크 성공은 애플리케이션 기동을 뜻하며 수집 완료는 회차와 실제 적재로 확인한다.
+앱이 기동하면 스케줄러가 최초 카탈로그와 가격 적재 상태를 확인하고 변경분 수집을 이어간다. 구매자 평가는 한국 시각 00:15에 그날 담당하는 앱을 조회한다.
 
-```sh
-cd ~/price-log
-bash current/deploy.sh "$(cat current/image)"
-```
+1. 서버에서 `curl -fsS http://127.0.0.1:8080/actuator/health`로 앱 기동을 확인한다. DB 마이그레이션 결과는 `flyway_schema_history`에서 확인한다.
+2. `~/price-log/logs/pricelog.log`와 `pipeline_execution`에서 수집 회차의 시작과 커서 진행을 확인하고 실제 적재 건수를 대조한다.
 
 ## 실패와 수동 복귀
 
